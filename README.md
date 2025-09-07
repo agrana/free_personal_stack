@@ -8,10 +8,10 @@ A comprehensive template for quickly starting new personal projects with pre-con
 
 ```bash
 # Create a new repository from this template
-gh repo create your-project-name --template your-username/free_personal_stack
+gh repo create your-project-name --template agrana/free_personal_stack
 
 # Or clone and customize
-git clone https://github.com/your-username/free_personal_stack.git your-project-name
+git clone https://github.com/agrana/free_personal_stack.git your-project-name
 cd your-project-name
 ```
 
@@ -52,7 +52,7 @@ npm run dev
 
 **Note**: TypeScript and linting errors will appear until you run `npm install` to install the dependencies. This is normal for template repositories.
 
-### 5. Set up Pre-commit Hooks (Optional)
+### 5. Set up Pre-commit Hooks (not so Optional)
 
 ```bash
 # Install pre-commit for comprehensive hooks
@@ -70,8 +70,8 @@ See [PRE_COMMIT_SETUP.md](PRE_COMMIT_SETUP.md) for detailed pre-commit configura
 
 Before using this template, make sure you have:
 
-- **Terraform** (>= 1.0) - [Install from terraform.io](https://terraform.io)
-- **Node.js** (>= 18.0) - [Install from nodejs.org](https://nodejs.org)
+- **Terraform** (>= 1.9) - [Install from terraform.io](https://terraform.io)
+- **Node.js** (>= 20.0) - [Install from nodejs.org](https://nodejs.org)
 - **Git** - For version control
 - **Cloudflare Account** - For DNS and email routing
 - **Vercel Account** - For hosting
