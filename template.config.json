@@ -1,0 +1,30 @@
+{
+  "name": "Personal Project Template",
+  "description": "A template for quickly starting new personal projects with infrastructure setup",
+  "version": "1.0.0",
+  "author": "Your Name",
+  "license": "MIT",
+  "keywords": [
+    "template",
+    "terraform",
+    "infrastructure",
+    "vercel",
+    "supabase",
+    "cloudflare"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/free_personal_stack"
+  },
+  "scripts": {
+    "setup": "./scripts/setup.sh",
+    "terraform:init": "cd terraform && terraform init",
+    "terraform:plan": "cd terraform && terraform plan",
+    "terraform:apply": "cd terraform && terraform apply",
+    "terraform:destroy": "cd terraform && terraform destroy"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "terraform": ">=1.0.0"
+  }
+}

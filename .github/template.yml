@@ -1,0 +1,22 @@
+name: Personal Project Template
+description: A comprehensive template for quickly starting new personal projects with infrastructure setup
+visibility: public
+include_all_branches: false
+
+# Template variables that will be replaced when creating a new repository
+variables:
+  - name: project_name
+    description: Name of your project
+    default: my-project
+  - name: project_description
+    description: Description of your project
+    default: A new personal project
+  - name: author_name
+    description: Your name
+    default: Your Name
+  - name: author_email
+    description: Your email
+    default: your.email@example.com
+  - name: github_username
+    description: Your GitHub username
+    default: your-username

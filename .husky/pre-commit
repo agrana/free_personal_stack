@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Run lint-staged for staged files
+npm run pre-commit
+
+# Run full pre-commit checks (optional - can be slow)
+# Uncomment the line below if you want comprehensive checks on every commit
+# npm run pre-commit-full

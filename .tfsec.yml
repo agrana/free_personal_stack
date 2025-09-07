@@ -1,0 +1,49 @@
+# TFSec configuration
+# This file configures TFSec for Terraform security scanning
+
+# Minimum severity level to report
+minimum-severity: MEDIUM
+
+# Include checks
+include:
+  - 'terraform/'
+
+# Exclude checks
+exclude:
+  - 'terraform/.terraform/'
+  - 'terraform/terraform.tfstate*'
+
+# Exclude specific rules that might be too strict for templates
+excluded-rules:
+  # AWS S3 bucket rules (often too strict for templates)
+  - aws-s3-enable-bucket-logging
+  - aws-s3-enable-versioning
+  - aws-s3-enable-bucket-encryption
+
+  # Cloudflare rules (template-specific)
+  - cloudflare-enable-dnssec
+
+  # General rules that might be too strict
+  - aws-ec2-enforce-http-token-imds
+  - aws-ec2-enforce-https-imds
+
+# Custom severity overrides
+severity-overrides:
+  # Make some rules warnings instead of errors
+  aws-s3-enable-bucket-logging: WARNING
+  aws-s3-enable-versioning: WARNING
+
+# Output format
+format: json
+
+# Include passed checks in output
+include-passed: false
+
+# Include ignored checks in output
+include-ignored: false
+
+# Custom checks directory (if you want to add custom rules)
+custom-check-dir: ''
+
+# Config file location
+config-file: '.tfsec.yml'

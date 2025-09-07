@@ -1,0 +1,33 @@
+# Copy this file to terraform.tfvars and fill in your values
+
+# Domain configuration
+domain_name = "yourdomain.com"  # Your domain name
+app_url     = "yourproject.vercel.app"  # Your Vercel app URL
+
+# Email forwarding configuration
+support_email = "your-support@example.com"  # Where support emails go
+contact_email = "your-contact@example.com"  # Where contact emails go
+
+# Cloudflare API token (get from https://dash.cloudflare.com/profile/api-tokens)
+# Required permissions: Zone:Zone:Read, Zone:DNS:Edit, Zone:Email Routing:Read, Zone:Email Routing:Edit
+cloudflare_api_token = "your-cloudflare-api-token"
+
+# Vercel Configuration
+vercel_api_token = "your-vercel-api-token"  # Get from https://vercel.com/account/tokens
+vercel_team_id   = ""  # Leave empty for personal account, or add team ID
+vercel_project_name = "your-project-name"  # Name of your Vercel project
+github_repo      = "your-username/your-repo"  # Your GitHub repository
+
+# Supabase Configuration (optional - remove if not using Supabase)
+supabase_url                = "https://your-project.supabase.co"
+supabase_anon_key          = "your-supabase-anon-key"
+supabase_service_role_key  = "your-supabase-service-role-key"
+supabase_access_token = "your-supabase-access-token"  # Get from https://supabase.com/dashboard/account/tokens
+supabase_project_id   = "your-supabase-project-id"  # Your Supabase project ID
+
+# Google OAuth Configuration (optional - remove if not using Google OAuth)
+google_client_id     = "your-google-client-id"
+google_client_secret = "your-google-client-secret"
+
+# NextAuth Configuration (optional - remove if not using NextAuth)
+nextauth_secret = "your-nextauth-secret"

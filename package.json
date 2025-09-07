@@ -1,0 +1,106 @@
+{
+  "name": "personal-project-template",
+  "version": "1.0.0",
+  "description": "A template for quickly starting new personal projects with infrastructure setup",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "lint:fix": "next lint --fix",
+    "type-check": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "echo \"No tests specified yet\" && exit 0",
+    "prepare": "husky",
+    "pre-commit": "lint-staged",
+    "pre-commit-full": "./scripts/pre-commit-check.sh",
+    "terraform:fmt": "cd terraform && terraform fmt -recursive",
+    "terraform:fmt-check": "cd terraform && terraform fmt -check -recursive",
+    "terraform:validate": "cd terraform && terraform validate",
+    "terraform:security": "cd terraform && terraform plan -detailed-exitcode",
+    "terraform:docs": "cd terraform && terraform-docs markdown . > README.md",
+    "setup": "./scripts/setup.sh",
+    "terraform:init": "cd terraform && terraform init",
+    "terraform:plan": "cd terraform && terraform plan",
+    "terraform:apply": "cd terraform && terraform apply",
+    "terraform:destroy": "cd terraform && terraform destroy",
+    "terraform:status": "./scripts/quick-start.sh status",
+    "infra:plan": "./scripts/quick-start.sh plan",
+    "infra:apply": "./scripts/quick-start.sh apply",
+    "infra:destroy": "./scripts/quick-start.sh destroy",
+    "db:reset": "supabase db reset",
+    "db:migrate": "supabase db push",
+    "db:seed": "supabase db seed"
+  },
+  "dependencies": {
+    "next": "^14.0.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "@supabase/supabase-js": "^2.38.0",
+    "@supabase/auth-helpers-nextjs": "^0.8.7",
+    "@supabase/auth-helpers-react": "^0.4.2",
+    "@supabase/auth-ui-react": "^0.4.7",
+    "@supabase/auth-ui-shared": "^0.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "eslint": "^8.0.0",
+    "eslint-config-next": "^14.0.0",
+    "typescript": "^5.0.0",
+    "supabase": "^1.123.0",
+    "tailwindcss": "^3.3.0",
+    "autoprefixer": "^10.4.0",
+    "postcss": "^8.4.0",
+    "prettier": "^3.0.0",
+    "husky": "^8.0.0",
+    "lint-staged": "^15.0.0",
+    "@commitlint/cli": "^18.0.0",
+    "@commitlint/config-conventional": "^18.0.0"
+  },
+  "keywords": [
+    "template",
+    "terraform",
+    "infrastructure",
+    "vercel",
+    "supabase",
+    "cloudflare",
+    "personal-projects",
+    "nextjs"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/free_personal_stack.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/free_personal_stack/issues"
+  },
+  "homepage": "https://github.com/your-username/free_personal_stack#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ],
+    "*.{css,scss}": [
+      "prettier --write"
+    ],
+    "terraform/**/*.tf": [
+      "terraform fmt -recursive",
+      "terraform validate"
+    ],
+    "terraform/**/*.tfvars": [
+      "terraform fmt -recursive"
+    ]
+  }
+}
