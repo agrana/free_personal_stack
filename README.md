@@ -110,6 +110,19 @@ Before using this template, make sure you have:
 - **TypeScript** - Type-safe JavaScript
 - **Todo List Demo** - Working example with CRUD operations
 
+## Architecture Overview
+
+This template provides a complete full-stack architecture:
+
+- **☁️ Cloudflare**: DNS management, CDN, and email routing
+- **▲ Vercel**: Next.js hosting with serverless functions
+- **🗄️ Supabase**: PostgreSQL database with authentication
+- **🔐 Google Auth**: OAuth integration for social login
+- **🏗️ Terraform**: Infrastructure as Code for all services
+
+📊 **[View Detailed Architecture Diagrams →](./ARCHITECTURE.md)**  
+🔄 **[View Simplified Component Flow →](./ARCHITECTURE_SIMPLE.md)**
+
 ### Project Structure
 
 ```
