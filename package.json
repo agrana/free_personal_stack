@@ -22,6 +22,8 @@
     "terraform:security": "cd terraform && terraform plan -detailed-exitcode",
     "terraform:docs": "cd terraform && terraform-docs markdown . > README.md",
     "setup": "./scripts/setup.sh",
+    "setup:local": "./scripts/setup-local.sh",
+    "check:secrets": "./scripts/check-secrets.sh",
     "terraform:init": "cd terraform && terraform init",
     "terraform:plan": "cd terraform && terraform plan",
     "terraform:apply": "cd terraform && terraform apply",

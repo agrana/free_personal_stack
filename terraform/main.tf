@@ -2,6 +2,26 @@
 locals {
   domain_name = var.domain_name
   zone_id     = data.cloudflare_zone.main.id
+  
+  # Environment variables for Vercel
+  vercel_env_vars = {
+    NEXT_PUBLIC_SUPABASE_URL = {
+      value  = var.supabase_url
+      target = ["production", "preview", "development"]
+    }
+    NEXT_PUBLIC_SUPABASE_ANON_KEY = {
+      value  = var.supabase_anon_key
+      target = ["production", "preview", "development"]
+    }
+    SUPABASE_SERVICE_ROLE_KEY = {
+      value  = var.supabase_service_role_key
+      target = ["production", "preview", "development"]
+    }
+    NEXT_PUBLIC_SITE_URL = {
+      value  = var.site_url != "" ? var.site_url : "https://${var.domain_name}"
+      target = ["production", "preview", "development"]
+    }
+  }
 }
 
 # Data source to get the zone ID for the domain
@@ -32,10 +52,11 @@ module "email_routing" {
 module "vercel" {
   source = "./modules/vercel"
 
-  project_name = var.vercel_project_name
-  domain_name  = local.domain_name
-  github_repo  = var.github_repo
-  team_id      = var.vercel_team_id
+  project_name        = var.vercel_project_name
+  domain_name         = local.domain_name
+  github_repo         = var.github_repo
+  team_id             = var.vercel_team_id
+  environment_variables = local.vercel_env_vars
 }
 
 # Supabase Module

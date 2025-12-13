@@ -97,3 +97,9 @@ variable "supabase_project_id" {
   description = "Supabase project ID"
   type        = string
 }
+
+variable "site_url" {
+  description = "Production site URL (defaults to https://{domain_name})"
+  type        = string
+  default     = ""
+}
