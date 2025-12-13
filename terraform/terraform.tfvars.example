@@ -22,8 +22,11 @@ github_repo      = "your-username/your-repo"  # Your GitHub repository
 supabase_url                = "https://your-project.supabase.co"
 supabase_anon_key          = "your-supabase-anon-key"
 supabase_service_role_key  = "your-supabase-service-role-key"
-supabase_access_token = "your-supabase-access-token"  # Get from https://supabase.com/dashboard/account/tokens
-supabase_project_id   = "your-supabase-project-id"  # Your Supabase project ID
+supabase_access_token      = "your-supabase-access-token"  # Get from https://supabase.com/dashboard/account/tokens
+supabase_project_id        = "your-supabase-project-id"  # Your Supabase project ID
+
+# Site URL (optional - defaults to https://{domain_name})
+site_url = "https://yourdomain.com"
 
 # Google OAuth Configuration (optional - remove if not using Google OAuth)
 google_client_id     = "your-google-client-id"

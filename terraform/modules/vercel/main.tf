@@ -10,7 +10,7 @@ terraform {
 # Data source to reference existing Vercel project
 data "vercel_project" "main" {
   name    = var.project_name
-  team_id = var.team_id
+  team_id = var.team_id != "" ? var.team_id : null
 }
 
 # Custom Domain
@@ -27,5 +27,13 @@ resource "vercel_project_domain" "main" {
   }
 }
 
-# Environment Variables are already configured in Vercel
-# No need to manage them with Terraform since they're already set up correctly
+# Environment Variables
+resource "vercel_project_environment_variable" "env_vars" {
+  for_each = var.environment_variables
+
+  project_id = data.vercel_project.main.id
+  team_id    = var.team_id != "" ? var.team_id : null
+  key        = each.key
+  value      = each.value.value
+  target     = each.value.target
+}
