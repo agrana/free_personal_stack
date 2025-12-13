@@ -10,7 +10,7 @@ terraform {
 # Data source to reference existing Vercel project
 data "vercel_project" "main" {
   name    = var.project_name
-  team_id = var.team_id
+  team_id = var.team_id != "" ? var.team_id : null
 }
 
 # Custom Domain

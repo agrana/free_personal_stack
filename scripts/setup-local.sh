@@ -77,9 +77,13 @@ if [[ $MIGRATION_TYPE =~ ^[Ll]$ ]]; then
     if command -v supabase &> /dev/null || command -v npx &> /dev/null; then
         if ! npx supabase status &> /dev/null 2>&1; then
             print_status "Starting Supabase locally..."
-            npx supabase start 2>&1 | grep -v "Unknown config field" || true
-            if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            # Run command and filter output, capture status immediately after pipeline
+            npx supabase start 2>&1 | grep -v "Unknown config field"
+            start_status=${PIPESTATUS[0]}  # Capture immediately, before any other command
+            if [ $start_status -eq 0 ]; then
                 print_success "Supabase started locally!"
+            else
+                print_warning "Supabase start failed or encountered errors (exit code: $start_status)"
             fi
         fi
         print_status "Running migrations on local Supabase..."
