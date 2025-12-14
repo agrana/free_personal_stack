@@ -8,20 +8,47 @@ variable "app_url" {
   type        = string
 }
 
-variable "support_email" {
-  description = "Email address to forward support emails to"
+variable "support_email_destination" {
+  description = "Real email address where support@domain emails should be forwarded (e.g., your-email@gmail.com)"
   type        = string
+  default     = ""
 }
 
-variable "contact_email" {
-  description = "Email address to forward contact emails to"
+variable "contact_email_destination" {
+  description = "Real email address where contact@domain and hello@domain emails should be forwarded (e.g., your-email@gmail.com)"
   type        = string
+  default     = ""
+}
+
+variable "enable_email_routing" {
+  description = "Enable Cloudflare email routing module (manages routing rules and optionally settings)"
+  type        = bool
+  default     = true
+}
+
+variable "manage_email_routing_settings" {
+  description = "Manage email routing settings (enabling/disabling). Requires account-level API token permissions. Set to false if you only have zone-level permissions (routing rules can still be managed)."
+  type        = bool
+  default     = false
 }
 
 variable "cloudflare_api_token" {
   description = "Cloudflare API token with all required permissions (Zone:Zone:Read, Zone:DNS:Edit, Zone:Email Routing:Read, Zone:Email Routing:Edit)"
   type        = string
   sensitive   = true
+}
+
+variable "cloudflare_account_id" {
+  description = "Cloudflare account ID - required for some accounts. Find it in Cloudflare Dashboard → Account Settings, or in the URL when viewing your account. Leave empty for personal accounts (may not work for all account types)"
+  type        = string
+  default     = ""
+  nullable    = true
+}
+
+variable "create_cloudflare_zone" {
+  description = "Create a new Cloudflare zone if it doesn't exist. Set to false if the zone already exists in your Cloudflare account."
+  type        = bool
+  default     = false
 }
 
 variable "vercel_api_token" {

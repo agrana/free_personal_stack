@@ -4,13 +4,20 @@
 domain_name = "yourdomain.com"  # Your domain name
 app_url     = "yourproject.vercel.app"  # Your Vercel app URL
 
-# Email forwarding configuration
-support_email = "your-support@example.com"  # Where support emails go
-contact_email = "your-contact@example.com"  # Where contact emails go
+# Email forwarding configuration (optional - requires account-level Cloudflare API token permissions)
+# Virtual addresses (support@domain, contact@domain, hello@domain) will forward to these REAL email addresses
+# If your token only has zone-level permissions, set enable_email_routing = false
+support_email_destination = "your-real-email@gmail.com"  # Real email where support@domain forwards to
+contact_email_destination = "your-real-email@gmail.com"  # Real email where contact@domain and hello@domain forward to
+# enable_email_routing = false  # Set to false to disable email routing module entirely
+# manage_email_routing_settings = false  # Set to false if you only have zone-level token permissions (settings require account-level, but routing rules can still be managed)
 
 # Cloudflare API token (get from https://dash.cloudflare.com/profile/api-tokens)
-# Required permissions: Zone:Zone:Read, Zone:DNS:Edit, Zone:Email Routing:Read, Zone:Email Routing:Edit
+# Required permissions: Zone:Zone:Read, Zone:DNS:Edit, Zone:Zone:Edit (if creating zone), Zone:Email Routing:Read, Zone:Email Routing:Edit
 cloudflare_api_token = "your-cloudflare-api-token"
+# cloudflare_account_id = "your-account-id"  # Optional for personal accounts, required for team accounts
+# Find account_id in Cloudflare Dashboard → Right sidebar shows "Account ID"
+# create_cloudflare_zone = false  # Set to true if zone doesn't exist and should be created, false to use existing zone
 
 # Vercel Configuration
 vercel_api_token = "your-vercel-api-token"  # Get from https://vercel.com/account/tokens
