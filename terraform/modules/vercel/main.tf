@@ -7,15 +7,21 @@ terraform {
   }
 }
 
-# Data source to reference existing Vercel project
-data "vercel_project" "main" {
-  name    = var.project_name
-  team_id = var.team_id != "" ? var.team_id : null
+# Create or reference Vercel project
+resource "vercel_project" "main" {
+  name      = var.project_name
+  team_id   = var.team_id != "" ? var.team_id : null
+  framework = "nextjs"
+
+  git_repository = {
+    type = "github"
+    repo = var.github_repo
+  }
 }
 
 # Custom Domain
 resource "vercel_project_domain" "main" {
-  project_id = data.vercel_project.main.id
+  project_id = vercel_project.main.id
   domain     = var.domain_name
 
   # Import existing domain - ignore changes to match current state
@@ -31,7 +37,7 @@ resource "vercel_project_domain" "main" {
 resource "vercel_project_environment_variable" "env_vars" {
   for_each = var.environment_variables
 
-  project_id = data.vercel_project.main.id
+  project_id = vercel_project.main.id
   team_id    = var.team_id != "" ? var.team_id : null
   key        = each.key
   value      = each.value.value

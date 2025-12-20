@@ -8,12 +8,18 @@ variable "domain_name" {
   type        = string
 }
 
-variable "support_email" {
-  description = "Email address to forward support emails to"
+variable "support_email_destination" {
+  description = "Real email address where support@domain emails should be forwarded (e.g., your-email@gmail.com)"
   type        = string
 }
 
-variable "contact_email" {
-  description = "Email address to forward contact emails to"
+variable "contact_email_destination" {
+  description = "Real email address where contact@domain and hello@domain emails should be forwarded (e.g., your-email@gmail.com)"
   type        = string
+}
+
+variable "manage_email_routing_settings" {
+  description = "Manage email routing settings (enabling/disabling). Requires account-level API token permissions. Set to false if you only have zone-level permissions."
+  type        = bool
+  default     = true
 }

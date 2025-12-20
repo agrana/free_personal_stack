@@ -1,11 +1,11 @@
 output "project_id" {
   description = "The ID of the Vercel project"
-  value       = data.vercel_project.main.id
+  value       = vercel_project.main.id
 }
 
 output "project_url" {
   description = "The URL of the Vercel project"
-  value       = "https://${data.vercel_project.main.name}.vercel.app"
+  value       = "https://${vercel_project.main.name}.vercel.app"
 }
 
 output "domain_url" {
