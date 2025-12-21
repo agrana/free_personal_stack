@@ -1,3 +1,4 @@
+// Legacy types - kept for backward compatibility if needed
 export interface Todo {
   id: string;
   title: string;
@@ -7,8 +8,10 @@ export interface Todo {
   user_id: string;
 }
 
-export interface User {
+// Verification test types
+export interface VerificationTest {
   id: string;
-  email: string;
+  message: string;
+  user_id: string;
   created_at: string;
 }

@@ -127,6 +127,22 @@ variable "supabase_project_id" {
   type        = string
 }
 
+variable "enable_supabase_project_deletion" {
+  description = <<-EOT
+    Enable automatic Supabase project deletion via CLI when running terraform destroy.
+    Requires Supabase CLI installed (npm install -g supabase or via npx) and supabase_access_token set.
+    
+    ⚠️  WARNING: When enabled (default: true), running terraform destroy will:
+    - Delete your Supabase project permanently
+    - Delete all data in the project
+    - This action CANNOT be undone!
+    
+    Set to false if you want to manage Supabase project deletion manually.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "site_url" {
   description = "Production site URL (defaults to https://{domain_name})"
   type        = string

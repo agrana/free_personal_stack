@@ -1,30 +1,30 @@
--- Create todos table
-CREATE TABLE IF NOT EXISTS public.todos (
+-- Create verification_tests table for infrastructure verification
+-- This table is used by the demo app to verify database connectivity and operations
+CREATE TABLE IF NOT EXISTS public.verification_tests (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    title TEXT NOT NULL,
-    completed BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE
+    message TEXT NOT NULL,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Enable Row Level Security
-ALTER TABLE public.todos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.verification_tests ENABLE ROW LEVEL SECURITY;
 
--- Create policies for todos table
-CREATE POLICY "Users can view their own todos" ON public.todos
+-- Create policies for verification_tests table
+CREATE POLICY "Users can view their own verification tests" ON public.verification_tests
     FOR SELECT USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can insert their own todos" ON public.todos
+CREATE POLICY "Users can insert their own verification tests" ON public.verification_tests
     FOR INSERT WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Users can update their own todos" ON public.todos
-    FOR UPDATE USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete their own todos" ON public.todos
+CREATE POLICY "Users can delete their own verification tests" ON public.verification_tests
     FOR DELETE USING (auth.uid() = user_id);
 
--- Create function to automatically update updated_at timestamp
+-- Create index for better performance
+CREATE INDEX IF NOT EXISTS idx_verification_tests_user_id ON public.verification_tests(user_id);
+CREATE INDEX IF NOT EXISTS idx_verification_tests_created_at ON public.verification_tests(created_at DESC);
+
+-- Create function to automatically update updated_at timestamp (for future use)
 CREATE OR REPLACE FUNCTION public.handle_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -32,13 +32,3 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
-
--- Create trigger to automatically update updated_at on todos
-CREATE TRIGGER handle_todos_updated_at
-    BEFORE UPDATE ON public.todos
-    FOR EACH ROW
-    EXECUTE FUNCTION public.handle_updated_at();
-
--- Create index for better performance
-CREATE INDEX IF NOT EXISTS idx_todos_user_id ON public.todos(user_id);
-CREATE INDEX IF NOT EXISTS idx_todos_created_at ON public.todos(created_at DESC);
