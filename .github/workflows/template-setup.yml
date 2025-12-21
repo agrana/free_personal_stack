@@ -12,6 +12,9 @@ jobs:
   setup-from-template:
     name: Setup from Template Variables
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
     # This runs when repository is created from template
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     
