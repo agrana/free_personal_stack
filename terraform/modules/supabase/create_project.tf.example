@@ -1,0 +1,114 @@
+# Example: Enhanced Supabase module with project creation support
+# 
+# NOTE: The Supabase Terraform provider doesn't support project creation or
+# retrieving API keys automatically. This is a limitation for security reasons.
+#
+# Option 1: Use Supabase CLI via null_resource (partial automation)
+# Option 2: Create manually and use Terraform to manage resources
+#
+# This file shows Option 1 - automated project creation via CLI
+
+terraform {
+  required_providers {
+    supabase = {
+      source  = "supabase/supabase"
+      version = "~> 1.0"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
+  }
+}
+
+# Create Supabase project via CLI
+resource "null_resource" "create_supabase_project" {
+  count = var.create_project ? 1 : 0
+
+  triggers = {
+    project_name     = var.project_name
+    organization_id  = var.organization_id
+    region          = var.region
+    db_password     = var.database_password
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Check if Supabase CLI is installed
+      if ! command -v supabase &> /dev/null; then
+        echo "Supabase CLI not found. Installing..."
+        npm install -g supabase
+      fi
+
+      # Login to Supabase (if not already logged in)
+      supabase login --token "${var.supabase_access_token}" || true
+
+      # Create project
+      PROJECT_OUTPUT=$(supabase projects create \
+        --name "${var.project_name}" \
+        --organization-id "${var.organization_id}" \
+        --db-password "${var.database_password}" \
+        --region "${var.region}" \
+        --output json)
+
+      # Extract project ID from output
+      PROJECT_ID=$(echo "$PROJECT_OUTPUT" | jq -r '.id // .project_id // empty')
+      
+      if [ -z "$PROJECT_ID" ]; then
+        echo "Error: Failed to extract project ID from output"
+        exit 1
+      fi
+
+      # Save project ID to a file for later use
+      echo "$PROJECT_ID" > .supabase_project_id
+      echo "Project created with ID: $PROJECT_ID"
+    EOT
+
+    environment = {
+      SUPABASE_ACCESS_TOKEN = var.supabase_access_token
+    }
+  }
+}
+
+# Read project ID from file (created by null_resource)
+data "local_file" "project_id" {
+  count    = var.create_project ? 1 : 0
+  filename = ".supabase_project_id"
+  depends_on = [null_resource.create_supabase_project]
+}
+
+# Use created project ID or provided project ID
+locals {
+  project_id = var.create_project ? (
+    try(data.local_file.project_id[0].content, var.project_id)
+  ) : var.project_id
+}
+
+# Output project information
+output "project_id" {
+  description = "The Supabase project ID"
+  value       = local.project_id
+}
+
+output "project_url" {
+  description = "The URL of the Supabase project"
+  value       = "https://${local.project_id}.supabase.co"
+}
+
+# IMPORTANT: API keys cannot be retrieved automatically
+# Users must get them from the Supabase Dashboard:
+# - Settings → API → anon/public key
+# - Settings → API → service_role key (click Reveal)
+output "api_keys_instructions" {
+  description = "Instructions for retrieving API keys"
+  value = <<-EOT
+    Project created! To get your API keys:
+    
+    1. Go to https://supabase.com/dashboard/project/${local.project_id}/settings/api
+    2. Copy the 'anon public' key for NEXT_PUBLIC_SUPABASE_ANON_KEY
+    3. Click 'Reveal' on 'service_role' key for SUPABASE_SERVICE_ROLE_KEY
+    
+    Add these to your terraform.tfvars or GitHub Secrets.
+  EOT
+}
+

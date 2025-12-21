@@ -115,6 +115,23 @@ export CLOUDFLARE_API_TOKEN="your-api-token"
 - Check Terraform logs: `TF_LOG=DEBUG terraform apply`
 - Verify Cloudflare API token: `curl -X GET "https://api.cloudflare.com/client/v4/user/tokens/verify" -H "Authorization: Bearer YOUR_TOKEN"`
 
+## Supabase Project Management
+
+### Automatic Project Deletion
+
+You can enable automatic Supabase project deletion when running `terraform destroy`:
+
+1. Install Supabase CLI: `npm install -g supabase` (or use `npx`)
+2. Set in `terraform.tfvars`:
+   ```hcl
+   enable_supabase_project_deletion = true
+   ```
+3. Ensure `supabase_access_token` is set in `terraform.tfvars`
+
+⚠️ **WARNING:** When enabled, `terraform destroy` will delete your Supabase project and all data. This cannot be undone!
+
+**Note:** Project creation must still be done manually (see TODO notes in `modules/supabase/main.tf` for future enhancements using CLI).
+
 ## Security Notes
 
 - Never commit `terraform.tfvars` to version control

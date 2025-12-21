@@ -80,7 +80,9 @@ module "vercel" {
 module "supabase" {
   source = "./modules/supabase"
 
-  project_id = var.supabase_project_id
+  project_id              = var.supabase_project_id
+  supabase_access_token   = var.supabase_access_token
+  enable_project_deletion = var.enable_supabase_project_deletion
 }
 
 # Outputs

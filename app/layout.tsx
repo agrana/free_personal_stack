@@ -6,8 +6,8 @@ import { redirect } from 'next/navigation';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata = {
-  title: 'Personal Project Template',
-  description: 'A template for quickly starting new personal projects',
+  title: 'Infrastructure Verification',
+  description: 'Verify that your infrastructure components are properly configured',
 };
 
 export default async function RootLayout({
@@ -29,7 +29,7 @@ export default async function RootLayout({
             <div className='flex justify-between h-16'>
               <div className='flex items-center'>
                 <h1 className='text-xl font-semibold text-gray-900'>
-                  Personal Project Template
+                  Infrastructure Verification
                 </h1>
               </div>
               <div className='flex items-center space-x-4'>

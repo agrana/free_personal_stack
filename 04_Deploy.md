@@ -1,6 +1,6 @@
 # Part 4: Deploy from GitHub
 
-**Time: 15 minutes**
+**Time: 20-30 minutes** (may take longer if troubleshooting permissions or connection issues)
 
 Deploy everything directly from GitHub. No local setup required.
 
