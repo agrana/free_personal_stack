@@ -4,19 +4,27 @@ visibility: public
 include_all_branches: false
 
 # Template variables that will be replaced when creating a new repository
+# These values will be available in files as ${{ variables.variable_name }}
 variables:
+  - name: domain_name
+    description: Your domain name (e.g., yourdomain.com or subdomain.yourdomain.com)
+    default: yourdomain.com
+    required: true
   - name: project_name
-    description: Name of your project
-    default: my-project
+    description: Name of your project (inferred from domain if not provided)
+    default: ""
   - name: project_description
     description: Description of your project
-    default: A new personal project
+    default: A new personal project with infrastructure automation
   - name: author_name
     description: Your name
-    default: Your Name
+    default: ""
   - name: author_email
-    description: Your email
-    default: your.email@example.com
-  - name: github_username
-    description: Your GitHub username
-    default: your-username
+    description: Your email (for contact)
+    default: ""
+  - name: support_email
+    description: Email address for support@ forwarding (optional)
+    default: ""
+  - name: contact_email
+    description: Email address for contact@ and hello@ forwarding (optional)
+    default: ""

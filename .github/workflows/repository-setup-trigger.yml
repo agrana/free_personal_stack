@@ -1,0 +1,194 @@
+name: Auto-Setup on Repository Creation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'README.md'
+  workflow_dispatch:
+
+jobs:
+  initial-setup:
+    name: Initial Repository Setup
+    runs-on: ubuntu-latest
+    # Only run on first push to main (when repo is created from template)
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create Setup Issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Check if setup issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'setup'
+            });
+            
+            const setupIssueExists = issues.data.some(issue => 
+              issue.title.includes('Setup Required') || 
+              issue.title.includes('Configure GitHub Secrets')
+            );
+            
+            if (!setupIssueExists) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '🚀 Setup Required: Configure GitHub Secrets',
+                body: `# Repository Setup Required
+                
+This repository was created from a template. Follow these steps to configure your secrets.
+                
+## Step 1: Create Production Environment
+                
+1. Go to **Settings** → **Environments**
+2. Click **"New environment"**
+3. Name it: \`production\`
+4. Click **"Configure environment"**
+                
+## Step 2: Add Required Secrets
+                
+Go to the \`production\` environment and add these secrets:
+                
+### Required (8 secrets)
+                
+| Secret Name | Description | How to Get It |
+|------------|-------------|---------------|
+| \`CLOUDFLARE_API_TOKEN\` | Cloudflare API token | [Cloudflare Dashboard → API Tokens](https://dash.cloudflare.com/profile/api-tokens) |
+| \`VERCEL_API_TOKEN\` | Vercel API token | [Vercel Account → Tokens](https://vercel.com/account/tokens) |
+| \`SUPABASE_URL\` | Supabase project URL | Supabase Dashboard → Settings → API |
+| \`SUPABASE_ANON_KEY\` | Supabase anonymous key | Supabase Dashboard → Settings → API |
+| \`SUPABASE_SERVICE_ROLE_KEY\` | Supabase service role key | Supabase Dashboard → Settings → API |
+| \`SUPABASE_ACCESS_TOKEN\` | Supabase access token | [Supabase Account → Tokens](https://supabase.com/dashboard/account/tokens) |
+| \`SUPABASE_PROJECT_ID\` | Supabase project ID | Supabase Dashboard → Settings → General |
+| \`DOMAIN_NAME\` | Your domain | Your domain name (e.g., \`yourdomain.com\`) |
+| \`TERRAFORM_STATE_PASSWORD\` | State encryption password | Generate with: \`openssl rand -base64 32\` |
+                
+## Step 3: Validate Setup
+                
+1. Go to **Actions** → **Repository Setup**
+2. Click **"Run workflow"**
+3. Select \`validate\` mode
+4. Click **"Run workflow"**
+                
+## What's Auto-Inferred?
+                
+You don't need to set these - they're automatically inferred:
+- \`GITHUB_REPO\` - From repository context
+- \`VERCEL_PROJECT_NAME\` - From domain name (sanitized)
+- \`APP_URL\` - From project name (\`{project-name}.vercel.app\`)
+- \`SITE_URL\` - From domain (\`https://{domain-name}\`)
+                
+## Documentation
+                
+- 📖 [.github/MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md) - Complete secrets guide
+- 📖 [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md) - Full setup instructions
+                
+## Quick Links
+                
+- 🔗 [Actions](https://github.com/${context.repo.owner}/${context.repo.repo}/actions)
+- 🔗 [Settings → Environments](https://github.com/${context.repo.owner}/${context.repo.repo}/settings/environments)
+- 🔗 [Settings → Secrets](https://github.com/${context.repo.owner}/${context.repo.repo}/settings/secrets/actions)
+                
+---
+                
+**Once all secrets are configured, you can run the Terraform workflow!** 🚀`,
+                labels: ['setup', 'documentation']
+              });
+              
+              console.log('✅ Created setup issue');
+            } else {
+              console.log('ℹ️ Setup issue already exists');
+            }
+
+      - name: Generate Secrets Template
+        run: |
+          mkdir -p .github
+          cat > .github/SECRETS_EXAMPLE.md << 'EOF'
+          # Secrets Configuration Guide
+          
+          This file shows what secrets you need to configure.
+          
+          ## Quick Setup
+          
+          1. **Create Environment:** Settings → Environments → New environment → `production`
+          2. **Add Secrets:** Add each secret below to the `production` environment
+          3. **Validate:** Run "Repository Setup" workflow → `validate` mode
+          
+          ## Required Secrets (8 total)
+          
+          ### 1. CLOUDFLARE_API_TOKEN
+          - Get from: [Cloudflare Dashboard → API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+          - Permissions needed: `Zone:Zone:Read`, `Zone:DNS:Edit`
+          - Example: `cf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+          
+          ### 2. VERCEL_API_TOKEN
+          - Get from: [Vercel Account → Tokens](https://vercel.com/account/tokens)
+          - Example: `xxxxxxxxxxxxxxxxxxxx`
+          
+          ### 3. SUPABASE_URL
+          - Get from: Supabase Dashboard → Settings → API → Project URL
+          - Example: `https://xxxxxxxxxxxxx.supabase.co`
+          
+          ### 4. SUPABASE_ANON_KEY
+          - Get from: Supabase Dashboard → Settings → API → anon/public key
+          - Example: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`
+          
+          ### 5. SUPABASE_SERVICE_ROLE_KEY
+          - Get from: Supabase Dashboard → Settings → API → service_role key (click "Reveal")
+          - ⚠️ Keep this secret!
+          - Example: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`
+          
+          ### 6. SUPABASE_ACCESS_TOKEN
+          - Get from: [Supabase Account → Access Tokens](https://supabase.com/dashboard/account/tokens)
+          - This is a personal access token (different from API keys)
+          - Example: `sbp_xxxxxxxxxxxxxxxxxxxx`
+          
+          ### 7. SUPABASE_PROJECT_ID
+          - Get from: Supabase Dashboard → Settings → General → Reference ID
+          - Example: `xxxxxxxxxxxxx`
+          
+          ### 8. DOMAIN_NAME
+          - Your domain name
+          - Example: `yourdomain.com` or `subdomain.yourdomain.com`
+          
+          ### 9. TERRAFORM_STATE_PASSWORD
+          - Generate a secure password:
+            \`\`\`bash
+            openssl rand -base64 32
+            \`\`\`
+          - Example output: `Kx8mP2vQ9rT4nL6jH8fD1sA3bC5eG7hI9jK0lM2nP4qR6sT8uV0wX2yZ4aB6cD`
+          
+          ## Auto-Inferred (No Need to Set)
+          
+          These are automatically inferred - you don't need to configure them:
+          
+          - ✅ `GITHUB_REPO` - From `github.repository` context
+          - ✅ `VERCEL_PROJECT_NAME` - From domain name (sanitized)
+          - ✅ `APP_URL` - From project name (`{project-name}.vercel.app`)
+          - ✅ `SITE_URL` - From domain (`https://{domain-name}`)
+          
+          ## Validation
+          
+          After adding secrets, run the "Repository Setup" workflow with `validate` mode to check if all secrets are configured correctly.
+          
+          See [.github/MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md) for more details.
+          EOF
+          
+          echo "📝 Created .github/SECRETS_EXAMPLE.md"
+
+      - name: Commit Setup Files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/SECRETS_EXAMPLE.md || true
+          git commit -m "Add secrets configuration guide" || exit 0
+          git push || exit 0
+

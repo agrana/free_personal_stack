@@ -4,10 +4,10 @@ A complete, production-ready infrastructure template for personal projects using
 
 ## 🚀 Quick Start
 
-1. **Fork this repository**
-2. **Create accounts** for Cloudflare, Vercel, and Supabase
-3. **Set up GitHub Secrets** (see [TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md))
-4. **Run Terraform** via GitHub Actions
+1. **Use this template** - Click "Use this template" on GitHub
+2. **Create accounts** - Sign up for Cloudflare, Vercel, and Supabase
+3. **Configure secrets** - A setup issue will be created automatically (or see [MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md))
+4. **Run Terraform** - Go to Actions → Terraform Infrastructure → Run workflow
 5. **Deploy your app!**
 
 For detailed setup instructions, see:

@@ -4,8 +4,9 @@ variable "domain_name" {
 }
 
 variable "app_url" {
-  description = "The URL where your app is hosted (e.g., myproject.vercel.app)"
+  description = "The URL where your app is hosted (e.g., myproject.vercel.app). If empty, inferred from vercel_project_name"
   type        = string
+  default     = ""
 }
 
 variable "support_email_destination" {
@@ -64,14 +65,15 @@ variable "vercel_team_id" {
 }
 
 variable "vercel_project_name" {
-  description = "Name of the Vercel project"
+  description = "Name of the Vercel project (if empty, inferred from domain_name by removing dots and special chars)"
   type        = string
   default     = ""
 }
 
 variable "github_repo" {
-  description = "GitHub repository in format 'owner/repo'"
+  description = "GitHub repository in format 'owner/repo'. In GitHub Actions, can be inferred from github.repository context"
   type        = string
+  default     = ""
 }
 
 # Supabase Configuration

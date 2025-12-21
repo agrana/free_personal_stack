@@ -9,18 +9,15 @@ Use this checklist to ensure all required secrets are configured in your GitHub 
 3. Add all secrets from the list below
 4. Test with `terraform plan` workflow
 
-## Required Secrets
+## Required Secrets (Minimum)
+
+These are the **absolute minimum** secrets you need:
 
 ### Cloudflare
 - [ ] `CLOUDFLARE_API_TOKEN` - API token with Zone:Zone:Read + Zone:DNS:Edit permissions
-- [ ] `CLOUDFLARE_ACCOUNT_ID` - (Optional) Account ID for team accounts
-- [ ] `CLOUDFLARE_ZONE_NAME` - (Optional) Parent zone name for subdomains
 
 ### Vercel
 - [ ] `VERCEL_API_TOKEN` - API token from Vercel account
-- [ ] `VERCEL_PROJECT_NAME` - Name of your Vercel project
-- [ ] `VERCEL_TEAM_ID` - (Optional) Team ID if using team account
-- [ ] `GITHUB_REPO` - (Optional) Repository name (defaults to current repo)
 
 ### Supabase
 - [ ] `SUPABASE_URL` - Project URL (https://xxx.supabase.co)
@@ -29,10 +26,34 @@ Use this checklist to ensure all required secrets are configured in your GitHub 
 - [ ] `SUPABASE_ACCESS_TOKEN` - Personal access token for CLI
 - [ ] `SUPABASE_PROJECT_ID` - Project reference ID
 
-### Domain & URLs
+### Domain
 - [ ] `DOMAIN_NAME` - Your domain (e.g., `yourdomain.com` or `subdomain.domain.com`)
-- [ ] `APP_URL` - Vercel app URL (e.g., `yourproject.vercel.app`)
-- [ ] `SITE_URL` - (Optional) Production site URL (defaults to https://{DOMAIN_NAME})
+
+### Terraform State Encryption
+- [ ] `TERRAFORM_STATE_PASSWORD` - Password for encrypting/decrypting Terraform state files
+
+## Optional Secrets (Auto-Inferred if Not Set)
+
+These will be automatically inferred if you don't set them:
+
+- `GITHUB_REPO` - **Auto-inferred** from `github.repository` context (no need to set!)
+- `VERCEL_PROJECT_NAME` - **Auto-inferred** from domain name (sanitized, e.g., `vbf.alfonsograna.com` → `vbf-alfonsograna-com`)
+- `APP_URL` - **Auto-inferred** from vercel project name (e.g., `vbf-alfonsograna-com.vercel.app`)
+- `SITE_URL` - **Auto-inferred** as `https://{DOMAIN_NAME}`
+
+## Additional Optional Secrets
+
+### Cloudflare
+- [ ] `CLOUDFLARE_ACCOUNT_ID` - Account ID for team accounts
+- [ ] `CLOUDFLARE_ZONE_NAME` - Parent zone name for subdomains (usually auto-detected)
+
+### Vercel
+- [ ] `VERCEL_TEAM_ID` - Team ID if using team account
+- [ ] `VERCEL_PROJECT_NAME` - Override auto-generated project name
+- [ ] `APP_URL` - Override auto-generated app URL
+
+### Domain & URLs
+- [ ] `SITE_URL` - Override default site URL (defaults to `https://{DOMAIN_NAME}`)
 
 ### Email Routing (Optional)
 - [ ] `SUPPORT_EMAIL_DESTINATION` - Real email for support@ forwarding
@@ -42,9 +63,6 @@ Use this checklist to ensure all required secrets are configured in your GitHub 
 - [ ] `ENABLE_EMAIL_ROUTING` - Enable email routing (default: `true`)
 - [ ] `CREATE_CLOUDFLARE_ZONE` - Create zone if missing (default: `false`)
 - [ ] `ENABLE_SUPABASE_PROJECT_DELETION` - Auto-delete on destroy (default: `true`)
-
-### Terraform State Encryption (Required for encrypted state)
-- [ ] `TERRAFORM_STATE_PASSWORD` - Password for encrypting/decrypting Terraform state files
 
 ## Secret Naming Convention
 

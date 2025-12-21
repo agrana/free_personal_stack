@@ -160,39 +160,62 @@ Restrict deployments to `main` only:
 
 ## Complete Secret List
 
-Here's the complete list of secrets to add:
+## Minimum Required Secrets
+
+Only these secrets are **required** - everything else is auto-inferred:
 
 ```bash
-# Cloudflare
+# Cloudflare (Required)
 CLOUDFLARE_API_TOKEN
-CLOUDFLARE_ACCOUNT_ID (optional)
-CLOUDFLARE_ZONE_NAME (optional, for subdomains)
 
-# Vercel
+# Vercel (Required)
 VERCEL_API_TOKEN
-VERCEL_PROJECT_NAME
-VERCEL_TEAM_ID (optional, if using team account)
 
-# Supabase
+# Supabase (Required)
 SUPABASE_URL
 SUPABASE_ANON_KEY
 SUPABASE_SERVICE_ROLE_KEY
 SUPABASE_ACCESS_TOKEN
 SUPABASE_PROJECT_ID
 
-# Domain & URLs
+# Domain (Required)
 DOMAIN_NAME
-APP_URL
-SITE_URL (optional, defaults to https://{DOMAIN_NAME})
 
-# Email Routing (optional)
+# State Encryption (Required)
+TERRAFORM_STATE_PASSWORD
+```
+
+## Auto-Inferred (No Need to Set!)
+
+These are automatically inferred from context:
+
+- `GITHUB_REPO` - From `github.repository` context
+- `VERCEL_PROJECT_NAME` - From domain name (e.g., `vbf.alfonsograna.com` → `vbf-alfonsograna-com`)
+- `APP_URL` - From project name (e.g., `vbf-alfonsograna-com.vercel.app`)
+- `SITE_URL` - From domain (e.g., `https://vbf.alfonsograna.com`)
+
+## Optional Secrets
+
+Only set these if you need to override the defaults:
+
+```bash
+# Cloudflare (Optional)
+CLOUDFLARE_ACCOUNT_ID  # For team accounts
+CLOUDFLARE_ZONE_NAME   # If auto-detection fails
+
+# Vercel (Optional)
+VERCEL_TEAM_ID         # For team accounts
+VERCEL_PROJECT_NAME    # Override auto-generated name
+APP_URL                # Override auto-generated URL
+
+# Domain (Optional)
+SITE_URL               # Override default (defaults to https://{DOMAIN_NAME})
+
+# Email Routing (Optional)
 SUPPORT_EMAIL_DESTINATION
 CONTACT_EMAIL_DESTINATION
 
-# GitHub
-GITHUB_REPO (optional, defaults to current repo)
-
-# Feature Flags (optional)
+# Feature Flags (Optional)
 ENABLE_EMAIL_ROUTING (default: true)
 CREATE_CLOUDFLARE_ZONE (default: false)
 ENABLE_SUPABASE_PROJECT_DELETION (default: true)
