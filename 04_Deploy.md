@@ -6,7 +6,32 @@ Deploy everything directly from GitHub. No local setup required.
 
 > **Note:** You'll use Terraform to configure everything, but you don't need to understand it. Just copy-paste the commands and fill in your values. Terraform handles all the infrastructure setup automatically.
 
-## Option A: Deploy with GitHub Codespaces (Recommended)
+## 🚀 Option A: Deploy with GitHub Actions (Recommended - Fully Automated)
+
+**No local setup required!** Run Terraform entirely through GitHub Actions.
+
+1. **Set up GitHub Environments and Secrets**
+   - See [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md) for complete instructions
+   - Add all required secrets to GitHub Environments
+   - See [.github/SECRETS_CHECKLIST.md](.github/SECRETS_CHECKLIST.md) for the full list
+
+2. **Run Terraform Workflow**
+   - Go to **Actions** → **Terraform Infrastructure**
+   - Click **"Run workflow"**
+   - Select command: `plan` (to preview) or `apply` (to deploy)
+   - Infrastructure is created automatically!
+
+**Benefits:**
+- ✅ No local Terraform installation needed
+- ✅ All secrets stored securely in GitHub
+- ✅ Automatic plans on PRs
+- ✅ Protection rules for production deployments
+
+See [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md) for detailed setup instructions.
+
+---
+
+## Option B: Deploy with GitHub Codespaces
 
 GitHub Codespaces gives you a cloud-based terminal. No local installs needed.
 

@@ -1,0 +1,41 @@
+terraform {
+  required_version = ">= 1.0"
+  required_providers {
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 4.0"
+    }
+    vercel = {
+      source  = "vercel/vercel"
+      version = "~> 1.0"
+    }
+    supabase = {
+      source  = "supabase/supabase"
+      version = "~> 1.0"
+    }
+  }
+
+  # OPTION 1: Terraform Cloud Backend (Recommended for GitHub Actions)
+  # Free tier available at https://app.terraform.io
+  backend "remote" {
+    organization = "your-org-name"
+    workspaces {
+      name = "your-workspace-name"
+    }
+  }
+
+  # OPTION 2: AWS S3 Backend (Advanced)
+  # Uncomment and configure if you prefer AWS
+  # backend "s3" {
+  #   bucket         = "your-terraform-state-bucket"
+  #   key            = "terraform.tfstate"
+  #   region         = "us-east-1"
+  #   dynamodb_table = "terraform-state-lock"
+  #   encrypt        = true
+  # }
+
+  # OPTION 3: Local Backend (Default - not recommended for GitHub Actions)
+  # No backend block = local state storage
+  # State stored in terraform.tfstate file (not persisted in CI/CD)
+}
+

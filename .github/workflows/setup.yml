@@ -1,0 +1,174 @@
+name: Repository Setup
+
+on:
+  repository_dispatch:
+    types: [setup-secrets]
+  workflow_dispatch:
+    inputs:
+      setup_mode:
+        description: 'Setup mode'
+        required: true
+        type: choice
+        options:
+          - validate
+          - create-template
+        default: validate
+
+jobs:
+  setup:
+    name: Setup Secrets Validation
+    runs-on: ubuntu-latest
+    if: github.event.inputs.setup_mode == 'validate' || github.event.client_payload.setup_mode == 'validate'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate Required Secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
+          TERRAFORM_STATE_PASSWORD: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
+        run: |
+          echo "## 🔍 Validating Secrets" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          missing_secrets=()
+          
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then missing_secrets+=("CLOUDFLARE_API_TOKEN"); fi
+          if [ -z "$VERCEL_API_TOKEN" ]; then missing_secrets+=("VERCEL_API_TOKEN"); fi
+          if [ -z "$SUPABASE_URL" ]; then missing_secrets+=("SUPABASE_URL"); fi
+          if [ -z "$SUPABASE_ANON_KEY" ]; then missing_secrets+=("SUPABASE_ANON_KEY"); fi
+          if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then missing_secrets+=("SUPABASE_SERVICE_ROLE_KEY"); fi
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then missing_secrets+=("SUPABASE_ACCESS_TOKEN"); fi
+          if [ -z "$SUPABASE_PROJECT_ID" ]; then missing_secrets+=("SUPABASE_PROJECT_ID"); fi
+          if [ -z "$DOMAIN_NAME" ]; then missing_secrets+=("DOMAIN_NAME"); fi
+          if [ -z "$TERRAFORM_STATE_PASSWORD" ]; then missing_secrets+=("TERRAFORM_STATE_PASSWORD"); fi
+          
+          if [ ${#missing_secrets[@]} -eq 0 ]; then
+            echo "✅ All required secrets are configured!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "You can now run the Terraform workflow." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Missing required secrets:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            for secret in "${missing_secrets[@]}"; do
+              echo "- \`$secret\`" >> $GITHUB_STEP_SUMMARY
+            done
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "👉 See [.github/MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md) for setup instructions." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+  create-template:
+    name: Create Secrets Template
+    runs-on: ubuntu-latest
+    if: github.event.inputs.setup_mode == 'create-template' || github.event.client_payload.setup_mode == 'create-template'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate Secrets Template
+        run: |
+          cat > SECRETS_TEMPLATE.md << 'EOF'
+          # Secrets Template for GitHub Actions
+          
+          Copy this template and add your real values to GitHub Secrets.
+          
+          Go to: **Settings** → **Environments** → **production** → **Add secret**
+          
+          ## Required Secrets
+          
+          | Secret Name | Example Value | Description |
+          |------------|---------------|-------------|
+          | `CLOUDFLARE_API_TOKEN` | `cf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` | Cloudflare API token |
+          | `VERCEL_API_TOKEN` | `xxxxxxxxxxxxxxxxxxxx` | Vercel API token |
+          | `SUPABASE_URL` | `https://xxxxxxxxxxxxx.supabase.co` | Supabase project URL |
+          | `SUPABASE_ANON_KEY` | `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...` | Supabase anonymous key |
+          | `SUPABASE_SERVICE_ROLE_KEY` | `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...` | Supabase service role key |
+          | `SUPABASE_ACCESS_TOKEN` | `sbp_xxxxxxxxxxxxxxxxxxxx` | Supabase access token |
+          | `SUPABASE_PROJECT_ID` | `xxxxxxxxxxxxx` | Supabase project ID |
+          | `DOMAIN_NAME` | `yourdomain.com` | Your domain name |
+          | `TERRAFORM_STATE_PASSWORD` | `$(openssl rand -base64 32)` | State encryption password |
+          
+          ## Generate State Password
+          
+          Run this command to generate a secure password:
+          
+          \`\`\`bash
+          openssl rand -base64 32
+          \`\`\`
+          
+          ## Auto-Inferred (No Need to Set)
+          
+          These are automatically inferred:
+          - \`GITHUB_REPO\` - From repository context
+          - \`VERCEL_PROJECT_NAME\` - From domain name
+          - \`APP_URL\` - From project name
+          - \`SITE_URL\` - From domain name
+          
+          See [.github/MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md) for details.
+          EOF
+          
+          echo "📝 Created SECRETS_TEMPLATE.md"
+          
+      - name: Create Issue with Setup Instructions
+        uses: actions/github-script@v7
+        if: github.event_name == 'repository_dispatch'
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚀 Setup Required: Configure GitHub Secrets',
+              body: `# Repository Setup Required
+              
+              This repository was created from a template. You need to configure secrets before running Terraform.
+              
+              ## Quick Setup
+              
+              1. Go to **Settings** → **Environments** → **New environment** → \`production\`
+              2. Add the required secrets (see template below)
+              3. Run the "Setup Secrets Validation" workflow to verify
+              
+              ## Required Secrets
+              
+              See [SECRETS_TEMPLATE.md](SECRETS_TEMPLATE.md) for the complete list.
+              
+              **Minimum Required (8 secrets):**
+              - \`CLOUDFLARE_API_TOKEN\`
+              - \`VERCEL_API_TOKEN\`
+              - \`SUPABASE_URL\`
+              - \`SUPABASE_ANON_KEY\`
+              - \`SUPABASE_SERVICE_ROLE_KEY\`
+              - \`SUPABASE_ACCESS_TOKEN\`
+              - \`SUPABASE_PROJECT_ID\`
+              - \`DOMAIN_NAME\`
+              - \`TERRAFORM_STATE_PASSWORD\` (generate with: \`openssl rand -base64 32\`)
+              
+              ## Next Steps
+              
+              - [ ] Create \`production\` environment
+              - [ ] Add all required secrets
+              - [ ] Run "Repository Setup" workflow → "validate" mode
+              - [ ] Run Terraform workflow → "plan" command
+              
+              See [.github/MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md) for detailed instructions.`
+            })
+
+      - name: Commit Template
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add SECRETS_TEMPLATE.md
+          git commit -m "Add secrets template for repository setup" || exit 0
+          git push || exit 0
+

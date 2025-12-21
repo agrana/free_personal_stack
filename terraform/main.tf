@@ -6,6 +6,17 @@ locals {
   # Use created zone ID if creating, otherwise use existing zone ID
   zone_id = var.create_cloudflare_zone ? cloudflare_zone.new[0].id : data.cloudflare_zone.existing[0].id
 
+  # Infer vercel_project_name from domain_name if not provided
+  # Remove dots, replace with hyphens, lowercase
+  sanitized_domain = replace(replace(lower(var.domain_name), ".", "-"), "_", "-")
+  vercel_project_name = var.vercel_project_name != "" ? var.vercel_project_name : local.sanitized_domain
+
+  # Infer app_url from vercel_project_name if not provided
+  app_url = var.app_url != "" ? var.app_url : "${local.vercel_project_name}.vercel.app"
+
+  # Infer github_repo - should be provided but has fallback
+  github_repo = var.github_repo != "" ? var.github_repo : "unknown/unknown"
+
   # Environment variables for Vercel
   vercel_env_vars = {
     NEXT_PUBLIC_SUPABASE_URL = {
@@ -50,7 +61,7 @@ module "dns" {
   zone_id     = local.zone_id
   domain_name = local.domain_name
   parent_zone = local.parent_zone
-  app_url     = var.app_url
+  app_url     = local.app_url
 }
 
 # Email Routing Module (optional - requires account-level API token permissions)
@@ -69,9 +80,9 @@ module "email_routing" {
 module "vercel" {
   source = "./modules/vercel"
 
-  project_name          = var.vercel_project_name
+  project_name          = local.vercel_project_name
   domain_name           = local.domain_name
-  github_repo           = var.github_repo
+  github_repo           = local.github_repo
   team_id               = var.vercel_team_id
   environment_variables = local.vercel_env_vars
 }
