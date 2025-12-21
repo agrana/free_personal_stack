@@ -42,64 +42,47 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 title: '🚀 Setup Required: Configure GitHub Secrets',
-                body: `# Repository Setup Required
-                
-This repository was created from a template. Follow these steps to configure your secrets.
-                
-## Step 1: Create Production Environment
-                
-1. Go to **Settings** → **Environments**
-2. Click **"New environment"**
-3. Name it: \`production\`
-4. Click **"Configure environment"**
-                
-## Step 2: Add Required Secrets
-                
-Go to the \`production\` environment and add these secrets:
-                
-### Required (8 secrets)
-                
-| Secret Name | Description | How to Get It |
-|------------|-------------|---------------|
-| \`CLOUDFLARE_API_TOKEN\` | Cloudflare API token | [Cloudflare Dashboard → API Tokens](https://dash.cloudflare.com/profile/api-tokens) |
-| \`VERCEL_API_TOKEN\` | Vercel API token | [Vercel Account → Tokens](https://vercel.com/account/tokens) |
-| \`SUPABASE_URL\` | Supabase project URL | Supabase Dashboard → Settings → API |
-| \`SUPABASE_ANON_KEY\` | Supabase anonymous key | Supabase Dashboard → Settings → API |
-| \`SUPABASE_SERVICE_ROLE_KEY\` | Supabase service role key | Supabase Dashboard → Settings → API |
-| \`SUPABASE_ACCESS_TOKEN\` | Supabase access token | [Supabase Account → Tokens](https://supabase.com/dashboard/account/tokens) |
-| \`SUPABASE_PROJECT_ID\` | Supabase project ID | Supabase Dashboard → Settings → General |
-| \`DOMAIN_NAME\` | Your domain | Your domain name (e.g., \`yourdomain.com\`) |
-| \`TERRAFORM_STATE_PASSWORD\` | State encryption password | Generate with: \`openssl rand -base64 32\` |
-                
-## Step 3: Validate Setup
-                
-1. Go to **Actions** → **Repository Setup**
-2. Click **"Run workflow"**
-3. Select \`validate\` mode
-4. Click **"Run workflow"**
-                
-## What's Auto-Inferred?
-                
-You don't need to set these - they're automatically inferred:
-- \`GITHUB_REPO\` - From repository context
-- \`VERCEL_PROJECT_NAME\` - From domain name (sanitized)
-- \`APP_URL\` - From project name (\`{project-name}.vercel.app\`)
-- \`SITE_URL\` - From domain (\`https://{domain-name}\`)
-                
-## Documentation
-                
-- 📖 [.github/MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md) - Complete secrets guide
-- 📖 [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md) - Full setup instructions
-                
-## Quick Links
-                
-- 🔗 [Actions](https://github.com/${context.repo.owner}/${context.repo.repo}/actions)
-- 🔗 [Settings → Environments](https://github.com/${context.repo.owner}/${context.repo.repo}/settings/environments)
-- 🔗 [Settings → Secrets](https://github.com/${context.repo.owner}/${context.repo.repo}/settings/secrets/actions)
-                
----
-                
-**Once all secrets are configured, you can run the Terraform workflow!** 🚀`,
+                body: '# Repository Setup Required\n\n' +
+                'This repository was created from a template. Follow these steps to configure your secrets.\n\n' +
+                '## Step 1: Create Production Environment\n\n' +
+                '1. Go to **Settings** → **Environments**\n' +
+                '2. Click **"New environment"**\n' +
+                '3. Name it: `production`\n' +
+                '4. Click **"Configure environment"**\n\n' +
+                '## Step 2: Add Required Secrets\n\n' +
+                'Go to the `production` environment and add these secrets:\n\n' +
+                '### Required (8 secrets)\n\n' +
+                '| Secret Name | Description | How to Get It |\n' +
+                '|------------|-------------|---------------|\n' +
+                '| `CLOUDFLARE_API_TOKEN` | Cloudflare API token | [Cloudflare Dashboard → API Tokens](https://dash.cloudflare.com/profile/api-tokens) |\n' +
+                '| `VERCEL_API_TOKEN` | Vercel API token | [Vercel Account → Tokens](https://vercel.com/account/tokens) |\n' +
+                '| `SUPABASE_URL` | Supabase project URL | Supabase Dashboard → Settings → API |\n' +
+                '| `SUPABASE_ANON_KEY` | Supabase anonymous key | Supabase Dashboard → Settings → API |\n' +
+                '| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | Supabase Dashboard → Settings → API |\n' +
+                '| `SUPABASE_ACCESS_TOKEN` | Supabase access token | [Supabase Account → Tokens](https://supabase.com/dashboard/account/tokens) |\n' +
+                '| `SUPABASE_PROJECT_ID` | Supabase project ID | Supabase Dashboard → Settings → General |\n' +
+                '| `DOMAIN_NAME` | Your domain | Your domain name (e.g., `yourdomain.com`) |\n' +
+                '| `TERRAFORM_STATE_PASSWORD` | State encryption password | Generate with: `openssl rand -base64 32` |\n\n' +
+                '## Step 3: Validate Setup\n\n' +
+                '1. Go to **Actions** → **Repository Setup**\n' +
+                '2. Click **"Run workflow"**\n' +
+                '3. Select `validate` mode\n' +
+                '4. Click **"Run workflow"**\n\n' +
+                '## What\'s Auto-Inferred?\n\n' +
+                'You don\'t need to set these - they\'re automatically inferred:\n' +
+                '- `GITHUB_REPO` - From repository context\n' +
+                '- `VERCEL_PROJECT_NAME` - From domain name (sanitized)\n' +
+                '- `APP_URL` - From project name (`{project-name}.vercel.app`)\n' +
+                '- `SITE_URL` - From domain (`https://{domain-name}`)\n\n' +
+                '## Documentation\n\n' +
+                '- 📖 [.github/MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md) - Complete secrets guide\n' +
+                '- 📖 [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md) - Full setup instructions\n\n' +
+                '## Quick Links\n\n' +
+                '- 🔗 [Actions](https://github.com/' + context.repo.owner + '/' + context.repo.repo + '/actions)\n' +
+                '- 🔗 [Settings → Environments](https://github.com/' + context.repo.owner + '/' + context.repo.repo + '/settings/environments)\n' +
+                '- 🔗 [Settings → Secrets](https://github.com/' + context.repo.owner + '/' + context.repo.repo + '/settings/secrets/actions)\n\n' +
+                '---\n\n' +
+                '**Once all secrets are configured, you can run the Terraform workflow!** 🚀',
                 labels: ['setup', 'documentation']
               });
               
