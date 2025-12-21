@@ -4,6 +4,8 @@ A comprehensive template for quickly starting new personal projects with pre-con
 
 ## 🚀 Quick Start
 
+**⏱️ First-time setup typically takes 30-60 minutes** depending on your familiarity with the tools and any troubleshooting needed. The guides are broken into parts to make it easier to follow.
+
 ### 1. Use this template
 
 ```bash
@@ -33,6 +35,10 @@ This interactive script will guide you through configuring:
 ./scripts/quick-start.sh apply
 ```
 
+**Common issues:**
+- If you get Cloudflare API errors, check the [troubleshooting section](#-troubleshooting) for token permissions
+- Email routing rules may need to be deleted and recreated (see troubleshooting)
+
 ### 4. Set up the Next.js app
 
 ```bash
@@ -44,6 +50,7 @@ cp env.example .env.local
 # Edit .env.local with your Supabase credentials
 
 # Run database migrations
+npx supabase link --project-ref YOUR_PROJECT_ID --password YOUR_DB_PASSWORD
 npx supabase db push
 
 # Start development server
@@ -51,6 +58,8 @@ npm run dev
 ```
 
 **Note**: TypeScript and linting errors will appear until you run `npm install` to install the dependencies. This is normal for template repositories.
+
+**Migration troubleshooting:** If migrations fail, see the [troubleshooting section](#-troubleshooting) for connection issues.
 
 ### 5. Set up Pre-commit Hooks (not so Optional)
 
@@ -168,12 +177,25 @@ This template provides a complete full-stack architecture:
 #### Cloudflare API Token
 
 1. Go to [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens)
-2. Create a custom token with these permissions:
-   - `Zone:Zone:Read`
-   - `Zone:DNS:Edit`
-   - `Zone:Email Routing:Read`
-   - `Zone:Email Routing:Edit`
-3. Set zone resources to include your domain
+2. Click "Create Token" → "Create custom token"
+3. Configure **Permissions** (Zone section):
+   - `Zone:Zone:Read` (REQUIRED - needed to look up zones)
+   - `Zone:DNS:Edit` (REQUIRED - needed to create DNS records)
+   - `Zone:Email Routing:Read` (optional - if using email routing)
+   - `Zone:Email Routing:Edit` (optional - if using email routing)
+   
+   **Important:** 
+   - `Zone:Zone:Read` is separate from DNS permissions. You need **both** `Zone:Zone:Read` (to query zones) and `Zone:DNS:Edit` (to modify DNS records).
+   - `Zone:DNS:Edit` is different from `DNS Settings:Edit` - make sure you select the correct permission.
+   
+4. Configure **Zone Resources**:
+   - Select **"Include"** → **"All zones"** (recommended)
+   - OR select **"Include"** → **"Specific zone"** → Select your zone
+   
+   **Critical:** The token MUST be scoped to your zone. If you get "Authentication error (10000)" when creating DNS records, verify your zone is included in Zone Resources.
+   
+5. Click "Continue to summary" → "Create Token"
+6. Copy the token (you won't be able to see it again)
 
 #### Vercel API Token
 
@@ -319,27 +341,62 @@ The template includes:
 
 ### Common Issues
 
-1. **API Token Permissions**
-   - Verify token has required permissions
-   - Check token hasn't expired
+#### Cloudflare API Token Problems
 
-2. **Domain Not in Cloudflare**
+**Error: "no zone found" or "Authentication error (10000)"**
+- **Problem**: Token missing `Zone:Zone:Read` permission or not scoped correctly
+- **Solution**: 
+  1. Go to Cloudflare Dashboard → API Tokens → Edit your token
+  2. Add `Zone:Zone:Read` permission (separate from DNS permissions)
+  3. Ensure token is scoped to your zone under "Zone Resources"
+  4. You need **both** `Zone:Zone:Read` (to query zones) and `Zone:DNS:Edit` (to create records)
+
+**Error: "failed to create DNS record: Authentication error (10000)"**
+- **Problem**: Token missing `Zone:DNS:Edit` or not scoped to zone
+- **Solution**: Verify token has `Zone:DNS:Edit` (not `DNS Settings:Edit`) and is included in Zone Resources
+
+#### Email Routing Issues
+
+**Error: "required rule id missing" or "Duplicated Zone rule" when updating email rules**
+- **Problem**: Cloudflare provider has limitations updating existing email routing rules
+- **Solution**: 
+  1. Delete the rules in Cloudflare Dashboard → Email Routing
+  2. Remove from Terraform state: `terraform state rm 'module.email_routing[0].cloudflare_email_routing_rule.RULE_NAME'`
+  3. Run `terraform apply` to recreate them
+
+#### Database Migration Problems
+
+**Error: "failed to connect to postgres: failed SASL auth"**
+- **Problem**: Wrong password or token type
+- **Solution**: 
+  - `SUPABASE_ACCESS_TOKEN` must be a **personal access token** (Account → Access Tokens), NOT service role key
+  - `SUPABASE_DB_PASSWORD` is the database password, not an API key
+
+**Error: "Circuit breaker open" or connection timeouts**
+- **Problem**: Supabase infrastructure issue
+- **Solution**: Check Supabase Dashboard for project status, try restarting the project, wait a few minutes
+
+#### General Issues
+
+1. **Domain Not in Cloudflare**
    - Ensure domain is added to Cloudflare first
    - Verify domain ownership
+   - For subdomains, ensure parent zone exists
 
-3. **Email Routing Issues**
-   - Email routing requires a paid Cloudflare plan
-   - Check domain verification status
+2. **Vercel Project Not Found**
+   - Terraform will now create the project automatically
+   - Verify GitHub repo connection in Terraform config
 
-4. **Vercel Project Not Found**
-   - Ensure project exists in Vercel
-   - Check team ID if using team account
+3. **API Token Expired**
+   - Check tokens haven't expired
+   - Create new tokens if needed
 
 ### Getting Help
 
 - Check Terraform logs: `TF_LOG=DEBUG terraform apply`
 - Verify API tokens with service providers
-- Review Terraform documentation
+- Review detailed troubleshooting in [QUICK_START.md](QUICK_START.md)
+- Check the blog posts (00-05) for step-by-step guidance
 
 ## 📝 Customization
 
@@ -379,6 +436,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Cloudflare](https://cloudflare.com) for DNS and security
 - [Vercel](https://vercel.com) for hosting
 - [Supabase](https://supabase.com) for backend services
+
 
 ---
 

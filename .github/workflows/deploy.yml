@@ -34,10 +34,28 @@ jobs:
         with:
           version: ${{ env.SUPABASE_VERSION }}
 
-      - name: Run database migrations
+      - name: Link Supabase project
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
-          npx supabase db push --project-id ${{ secrets.SUPABASE_PROJECT_ID }}
+          # Retry linking in case of temporary connection issues
+          for i in 1 2 3; do
+            if npx supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"; then
+              exit 0
+            fi
+            if [ $i -lt 3 ]; then
+              echo "Link attempt $i failed, retrying in 5 seconds..."
+              sleep 5
+            fi
+          done
+          echo "Failed to link after 3 attempts"
+          exit 1
+      
+      - name: Run database migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          npx supabase db push
 

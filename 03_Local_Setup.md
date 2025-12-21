@@ -1,6 +1,6 @@
 # Part 3: Configure for Deployment
 
-**Time: 5 minutes**
+**Time: 10-15 minutes** (may take longer if troubleshooting)
 
 Configure everything directly in GitHub. No local setup needed.
 
@@ -12,8 +12,15 @@ Add these secrets:
 
 | Secret Name | Value | Where to Get It |
 |------------|-------|-----------------|
-| `SUPABASE_ACCESS_TOKEN` | Your Supabase access token | [Supabase Dashboard → Account → Access Tokens](https://supabase.com/dashboard/account/tokens) |
-| `SUPABASE_PROJECT_ID` | Your Supabase project ID | Supabase Dashboard → Settings → General → Reference ID |
+| `SUPABASE_ACCESS_TOKEN` | Your **personal access token** (NOT the service role key!) | [Supabase Dashboard → Account → Access Tokens](https://supabase.com/dashboard/account/tokens) - Click "Generate new token" if needed |
+| `SUPABASE_PROJECT_ID` | Your Supabase project ID | Supabase Dashboard → **Project Settings** → **General** → Reference ID |
+| `SUPABASE_DB_PASSWORD` | Your Supabase database password | The password you set when creating your Supabase project. If you forgot it, go to Project Settings → Database → Reset Database Password |
+
+**Important:** 
+- `SUPABASE_ACCESS_TOKEN` is different from your project API keys:
+  - **Access Token** (for GitHub Actions): From Account settings → Access Tokens (personal token for CLI/API)
+  - **Service Role Key** (for your app): From Project Settings → API Keys → service_role key
+- `SUPABASE_DB_PASSWORD` is the database password you set when creating the project (not the same as API keys)
 
 **Note:** These secrets are used for database migrations. Terraform configuration happens in Part 4.
 
@@ -26,8 +33,9 @@ You'll need these values in Part 4. Have them ready:
 - ✅ Supabase URL
 - ✅ Supabase anon key
 - ✅ Supabase service role key
-- ✅ Supabase access token (for GitHub Secrets above)
-- ✅ Supabase project ID
+- ✅ Supabase access token (for GitHub Secrets)
+- ✅ Supabase project ID (for GitHub Secrets)
+- ✅ Supabase database password (for GitHub Secrets)
 - ✅ Cloudflare API token (if using custom domain)
 - ✅ Your GitHub repo name (e.g., `YOUR_USERNAME/free_personal_stack`)
 

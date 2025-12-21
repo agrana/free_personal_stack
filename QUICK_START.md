@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-This guide will get you up and running with a new project in under 10 minutes.
+This guide will get you up and running with a new project. **First-time setup typically takes 30-60 minutes** depending on your familiarity with the tools and any troubleshooting needed. Subsequent projects will be much faster!
 
 ## 🚀 3-Step Setup
 
@@ -72,11 +72,22 @@ Before starting, ensure you have:
 ### Cloudflare API Token
 
 1. Go to [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens)
-2. Create custom token with permissions:
-   - `Zone:Zone:Read`
-   - `Zone:DNS:Edit`
-   - `Zone:Email Routing:Read`
-   - `Zone:Email Routing:Edit`
+2. Click "Create Token" → "Create custom token"
+3. Set **Permissions** (Zone section):
+   - `Zone:Zone:Read` (REQUIRED - needed to look up zones)
+   - `Zone:DNS:Edit` (REQUIRED - needed to create DNS records)
+   - `Zone:Email Routing:Read` (optional - if using email routing)
+   - `Zone:Email Routing:Edit` (optional - if using email routing)
+   
+   **Important:** 
+   - `Zone:Zone:Read` and `Zone:DNS:Edit` are SEPARATE permissions - you need **both**
+   - `Zone:DNS:Edit` is different from `DNS Settings:Edit` - select the correct one
+   
+4. Set **Zone Resources**:
+   - Include → All zones (recommended)
+   - OR Include → Specific zone → Select your zone
+   
+   **Critical:** Token must be scoped to your zone. "Authentication error (10000)" usually means missing Zone Resources.
 
 ### Vercel API Token
 
@@ -136,23 +147,69 @@ After running `npm run dev`, you'll have:
 
 ## 🚨 Troubleshooting
 
-### Setup Script Issues
+### Common Setup Issues
 
-- Ensure all required fields are filled
-- Verify API tokens have correct permissions
-- Check that domain is in Cloudflare
+#### Cloudflare API Token Issues
 
-### Terraform Issues
+**Error: "no zone found" or "Authentication error (10000)"**
+- **Cause**: Missing `Zone:Zone:Read` permission or token not scoped to your zone
+- **Fix**: 
+  1. Go to Cloudflare Dashboard → API Tokens
+  2. Edit your token and ensure it has **both**:
+     - `Zone:Zone:Read` (REQUIRED - separate from DNS permissions)
+     - `Zone:DNS:Edit` (REQUIRED - for creating DNS records)
+  3. Under "Zone Resources", ensure your zone is included (or select "All zones")
+  4. `Zone:DNS:Edit` is different from `DNS Settings:Edit` - select the correct one
 
-- Run `terraform validate` to check configuration
-- Check API token permissions
-- Verify domain ownership
+**Error: "failed to create DNS record: Authentication error (10000)"**
+- **Cause**: Token missing `Zone:DNS:Edit` permission or not scoped to zone
+- **Fix**: Verify token has `Zone:DNS:Edit` and is scoped to your zone in Zone Resources
 
-### Common Errors
+#### Email Routing Rules Issues
 
-- **"Zone not found"**: Domain not added to Cloudflare
-- **"Project not found"**: Vercel project doesn't exist
-- **"Permission denied"**: API token lacks required permissions
+**Error: "required rule id missing" or "Duplicated Zone rule"**
+- **Cause**: Cloudflare provider has issues updating existing email routing rules
+- **Fix**: 
+  1. Go to Cloudflare Dashboard → Email Routing → Routing Rules
+  2. Delete the existing rules manually
+  3. Remove from Terraform state: `terraform state rm 'module.email_routing[0].cloudflare_email_routing_rule.NAME'`
+  4. Run `terraform apply` to recreate them
+
+#### Database Migration Issues
+
+**Error: "failed to connect to postgres: failed SASL auth"**
+- **Cause**: Wrong password or token type
+- **Fix**: 
+  - `SUPABASE_ACCESS_TOKEN` must be a **personal access token** (from Account → Access Tokens), NOT the service role key
+  - `SUPABASE_DB_PASSWORD` is the database password you set when creating the project
+
+**Error: "Circuit breaker open" or connection timeouts**
+- **Cause**: Supabase infrastructure issue or database paused
+- **Fix**: 
+  1. Check Supabase Dashboard for project status
+  2. Try restarting the project
+  3. Wait a few minutes and retry
+  4. Check if your IP is blocked in Supabase network restrictions
+
+#### Terraform Issues
+
+- **"Zone not found"**: Domain not added to Cloudflare or wrong parent zone configured
+- **"Project not found"**: Vercel project doesn't exist (Terraform will create it automatically now)
+- **"Permission denied"**: API token lacks required permissions (see Cloudflare section above)
+
+#### General Setup Issues
+
+- Ensure all required fields are filled in `terraform.tfvars`
+- Verify API tokens haven't expired
+- Check that domain is added to Cloudflare before running Terraform
+- For subdomains, ensure the parent zone exists in Cloudflare
+
+### Expected First-Time Setup Time
+
+- **Terraform setup**: 10-20 minutes (longer if troubleshooting permissions)
+- **Database migrations**: 5-10 minutes (may need to troubleshoot connection issues)
+- **Testing**: 5-10 minutes
+- **Total**: 30-60 minutes for first setup
 
 ## 📚 Next Steps
 
