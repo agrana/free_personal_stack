@@ -57,7 +57,7 @@ jobs:
           fi
 
       - name: Create Setup Issue
-        if: steps.check-secrets.outputs.setup_complete == 'false'
+        if: steps.check-secrets.outcome == 'success' && steps.check-secrets.outputs.setup_complete != 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
