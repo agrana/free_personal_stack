@@ -1,11 +1,9 @@
-name: Auto-Setup on Repository Creation
+name: Auto-Setup Check
 
 on:
   push:
     branches:
       - main
-    paths:
-      - 'README.md'
   workflow_dispatch:
 
 permissions:
@@ -19,14 +17,47 @@ jobs:
     permissions:
       contents: write
       issues: write
-    # Only run on first push to main (when repo is created from template)
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Runs on every push until setup is complete
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check if Setup is Complete
+        id: check-secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
+          TERRAFORM_STATE_PASSWORD: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
+        run: |
+          missing_secrets=()
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then missing_secrets+=("CLOUDFLARE_API_TOKEN"); fi
+          if [ -z "$VERCEL_API_TOKEN" ]; then missing_secrets+=("VERCEL_API_TOKEN"); fi
+          if [ -z "$SUPABASE_URL" ]; then missing_secrets+=("SUPABASE_URL"); fi
+          if [ -z "$SUPABASE_ANON_KEY" ]; then missing_secrets+=("SUPABASE_ANON_KEY"); fi
+          if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then missing_secrets+=("SUPABASE_SERVICE_ROLE_KEY"); fi
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then missing_secrets+=("SUPABASE_ACCESS_TOKEN"); fi
+          if [ -z "$SUPABASE_PROJECT_ID" ]; then missing_secrets+=("SUPABASE_PROJECT_ID"); fi
+          if [ -z "$DOMAIN_NAME" ]; then missing_secrets+=("DOMAIN_NAME"); fi
+          if [ -z "$TERRAFORM_STATE_PASSWORD" ]; then missing_secrets+=("TERRAFORM_STATE_PASSWORD"); fi
+          
+          if [ ${#missing_secrets[@]} -eq 0 ]; then
+            echo "setup_complete=true" >> $GITHUB_OUTPUT
+            echo "✅ All required secrets are configured!"
+          else
+            echo "setup_complete=false" >> $GITHUB_OUTPUT
+            echo "missing_secrets=${missing_secrets[*]}" >> $GITHUB_OUTPUT
+            echo "❌ Missing ${#missing_secrets[@]} required secrets"
+          fi
+
       - name: Create Setup Issue
+        if: steps.check-secrets.outputs.setup_complete == 'false'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -95,10 +126,15 @@ jobs:
               
               console.log('✅ Created setup issue');
             } else {
-              console.log('ℹ️ Setup issue already exists');
+              console.log('ℹ️ Setup issue already exists - updating if needed');
+              // Optionally update existing issue with latest info
             }
+          } else {
+            console.log('✅ Setup is complete - no issue needed');
+          }
 
       - name: Generate Secrets Template
+        if: steps.check-secrets.outputs.setup_complete == 'false'
         run: |
           mkdir -p .github
           cat > .github/SECRETS_EXAMPLE.md << 'EOF'
@@ -175,10 +211,11 @@ jobs:
           echo "📝 Created .github/SECRETS_EXAMPLE.md"
 
       - name: Commit Setup Files
+        if: steps.check-secrets.outputs.setup_complete == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .github/SECRETS_EXAMPLE.md || true
-          git commit -m "Add secrets configuration guide" || exit 0
+          git diff --staged --quiet || git commit -m "Add secrets configuration guide" || exit 0
           git push || exit 0
 
