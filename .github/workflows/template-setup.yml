@@ -8,6 +8,10 @@ on:
       - 'README.md'
   workflow_dispatch:
 
+permissions:
+  contents: write
+  issues: write
+
 jobs:
   setup-from-template:
     name: Setup from Template Variables
