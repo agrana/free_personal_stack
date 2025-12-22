@@ -32,6 +32,10 @@ jobs:
     name: Terraform ${{ github.event.inputs.terraform_command || 'plan' }}
     runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    permissions:
+      contents: read
+      actions: read
+      # Needed to read workflow runs and download artifacts from previous runs
     
     defaults:
       run:
@@ -66,15 +70,73 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Get Latest Workflow Run ID
+        id: get-run-id
+        if: github.event_name != 'pull_request'
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const core = require('@actions/core');
+            const branch = context.ref.replace('refs/heads/', '');
+            
+            try {
+              const workflowRuns = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'terraform.yml',
+                branch: branch,
+                status: 'success',
+                per_page: 5
+              });
+              
+              if (workflowRuns.data.workflow_runs.length > 0) {
+                // Find the latest run that's not the current run and has artifacts
+                for (const run of workflowRuns.data.workflow_runs) {
+                  if (run.id !== context.runId) {
+                    // Check if this run has artifacts
+                    try {
+                      const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        run_id: run.id
+                      });
+                      
+                      const hasStateArtifact = artifacts.data.artifacts.some(
+                        artifact => artifact.name === 'terraform-state'
+                      );
+                      
+                      if (hasStateArtifact) {
+                        core.setOutput('run_id', run.id.toString());
+                        console.log(`Found previous successful run with state: ${run.id}`);
+                        return;
+                      }
+                    } catch (e) {
+                      console.log(`Could not check artifacts for run ${run.id}: ${e.message}`);
+                    }
+                  }
+                }
+                console.log('No previous run with state artifact found');
+              } else {
+                console.log('No previous successful runs found');
+              }
+            } catch (error) {
+              console.log(`Error finding previous run: ${error.message}`);
+              // Fail silently - this is the first run
+            }
+
       - name: Download Terraform State (if exists)
         uses: dawidd6/action-download-artifact@v3
         id: download-state
+        if: github.event_name != 'pull_request' && steps.get-run-id.outcome == 'success' && steps.get-run-id.outputs.run_id != ''
         continue-on-error: true
         with:
           name: terraform-state
           path: ${{ env.WORKING_DIRECTORY }}/
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          # Downloads from latest workflow run that has this artifact
+          run_id: ${{ steps.get-run-id.outputs.run_id }}
+          # Downloads from latest successful run of this workflow on the same branch
           # Needed for terraform plan to work correctly
           # On first run, this will fail silently (continue-on-error handles it)
 

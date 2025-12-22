@@ -8,10 +8,17 @@ on:
       - 'README.md'
   workflow_dispatch:
 
+permissions:
+  contents: write
+  issues: write
+
 jobs:
   initial-setup:
     name: Initial Repository Setup
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
     # Only run on first push to main (when repo is created from template)
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     
