@@ -5,6 +5,11 @@ on:
     types: [repository-created]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
 jobs:
   trigger-setup:
     name: Trigger Repository Setup
@@ -34,7 +39,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            github.rest.issues.create({
+            await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: '🚀 Welcome! Repository Setup Required',
