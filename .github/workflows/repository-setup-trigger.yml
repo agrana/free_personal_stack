@@ -3,8 +3,7 @@ name: Repository Setup Trigger
 on:
   push:
     branches:
-      - main
-      - master
+      - '**'  # Run on all branches
   repository_dispatch:
     types: [repository-created]
   workflow_dispatch:
@@ -18,33 +17,12 @@ jobs:
   trigger-setup:
     name: Trigger Repository Setup
     runs-on: ubuntu-latest
-    # Only run on first push (initial commit) or manual trigger
-    # Check if this is the initial commit by checking if before SHA is all zeros
-    if: |
-      github.event_name == 'workflow_dispatch' || 
-      github.event_name == 'repository_dispatch' || 
-      github.event.before == '0000000000000000000000000000000000000000'
-    
+    # Run on every push and manual trigger
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Check if this is initial commit
-        id: check-initial
-        run: |
-          COMMIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "1")
-          if [ "$COMMIT_COUNT" -le "1" ]; then
-            echo "is_initial=true" >> $GITHUB_OUTPUT
-            echo "✅ This appears to be the initial commit (commit count: $COMMIT_COUNT)"
-          else
-            echo "is_initial=false" >> $GITHUB_OUTPUT
-            echo "⚠️  Not the initial commit (commit count: $COMMIT_COUNT), skipping setup"
-          fi
 
       - name: Trigger Setup Workflow
-        if: steps.check-initial.outputs.is_initial == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -59,12 +37,28 @@ jobs:
               }
             });
 
-      - name: Create Initial Issue
-        if: steps.check-initial.outputs.is_initial == 'true'
+      - name: Create Initial Issue (if doesn't exist)
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            // Check if welcome issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: []
+            });
+            
+            const welcomeIssueExists = issues.data.some(issue => 
+              issue.title.includes('Welcome') || issue.title.includes('Setup Required')
+            );
+            
+            if (welcomeIssueExists) {
+              console.log('✅ Welcome issue already exists, skipping creation');
+              return;
+            }
+            
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,

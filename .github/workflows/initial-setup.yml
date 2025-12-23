@@ -3,8 +3,7 @@ name: Initial Repository Setup
 on:
   push:
     branches:
-      - main
-      - master
+      - '**'  # Run on all branches
   workflow_dispatch:
 
 permissions:
@@ -84,12 +83,12 @@ jobs:
           fi
 
       - name: Trigger Setup Validation Workflow
-        if: steps.check-env.outputs.exists == 'false'
+        # Always trigger validation on every run (not just when env doesn't exist)
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // Trigger the setup workflow to validate secrets
+            // Trigger the setup workflow to validate secrets on every commit
             try {
               await github.rest.actions.createWorkflowDispatch({
                 owner: context.repo.owner,
