@@ -32,6 +32,11 @@ jobs:
     name: Terraform ${{ github.event.inputs.terraform_command || 'plan' }}
     runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    # Skip on initial commit - setup workflows need to run first
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000')
     
     defaults:
       run:
@@ -65,6 +70,24 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify setup is complete
+        id: check-setup
+        run: |
+          # Check if this is still the initial commit
+          COMMIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "1")
+          if [ "$COMMIT_COUNT" -le "1" ]; then
+            echo "⚠️  This appears to be the initial commit"
+            echo "⚠️  Setup workflows should run first. Skipping Terraform."
+            echo "⚠️  Please wait for setup workflows to complete, then run Terraform manually."
+            echo "setup_complete=false" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "✅ Setup appears complete (commit count: $COMMIT_COUNT)"
+            echo "setup_complete=true" >> $GITHUB_OUTPUT
+          fi
 
       - name: Download Terraform State (if exists)
         uses: dawidd6/action-download-artifact@v3
