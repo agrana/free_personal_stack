@@ -252,12 +252,19 @@ jobs:
           echo "✅ Generated TERRAFORM_STATE_PASSWORD"
 
       - name: Create Auto-Generated Secrets via GitHub CLI
-        if: steps.generate-password.outputs.password != '' && secrets.GH_PAT != ''
+        id: set-password
+        if: steps.generate-password.outputs.password != ''
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           echo "## 🔐 Auto-Setting Secrets" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -z "$GH_PAT" ]; then
+            echo "⚠️  GH_PAT not provided, skipping auto-set of TERRAFORM_STATE_PASSWORD" >> $GITHUB_STEP_SUMMARY
+            echo "💡 To enable auto-setting secrets, add a \`GH_PAT\` secret with admin permissions." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
           
           gh auth login --with-token <<< "$GH_PAT"
           
@@ -277,7 +284,11 @@ jobs:
           EXISTING="${{ steps.check-secrets.outputs.existing }}"
           MISSING="${{ steps.check-secrets.outputs.missing }}"
           PASSWORD_GENERATED="${{ steps.generate-password.outputs.password != '' }}"
-          GH_PAT_PROVIDED="${{ secrets.GH_PAT != '' }}"
+          SET_PASSWORD_OUTCOME="${{ steps.set-password.outcome }}"
+          GH_PAT_PROVIDED="false"
+          if [ "$SET_PASSWORD_OUTCOME" = "success" ]; then
+            GH_PAT_PROVIDED="true"
+          fi
           
           if [ -n "$EXISTING" ]; then
             echo "### ✅ Existing Secrets" >> $GITHUB_STEP_SUMMARY
