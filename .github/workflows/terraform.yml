@@ -32,10 +32,16 @@ jobs:
     name: Terraform ${{ github.event.inputs.terraform_command || 'plan' }}
     runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-    permissions:
-      contents: read
-      actions: read
-      # Needed to read workflow runs and download artifacts from previous runs
+    # Skip on initial commit - setup workflows need to run first
+    # Only allow manual dispatch, PRs, or pushes that are NOT the initial commit
+    # Initial commits have before SHA as all zeros or empty/null
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'push' && 
+       github.event.before != null && 
+       github.event.before != '' && 
+       github.event.before != '0000000000000000000000000000000000000000')
     
     defaults:
       run:
@@ -51,11 +57,11 @@ jobs:
       TF_VAR_supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       TF_VAR_supabase_project_id: ${{ secrets.SUPABASE_PROJECT_ID }}
       TF_VAR_domain_name: ${{ secrets.DOMAIN_NAME }}
-      TF_VAR_app_url: ${{ secrets.APP_URL || '' }}
-      TF_VAR_site_url: ${{ secrets.SITE_URL || '' }}
-      TF_VAR_support_email_destination: ${{ secrets.SUPPORT_EMAIL_DESTINATION || '' }}
-      TF_VAR_contact_email_destination: ${{ secrets.CONTACT_EMAIL_DESTINATION || '' }}
-      TF_VAR_vercel_project_name: ${{ secrets.VERCEL_PROJECT_NAME || '' }}
+      TF_VAR_app_url: ${{ secrets.APP_URL }}
+      TF_VAR_site_url: ${{ secrets.SITE_URL || format('https://{0}', secrets.DOMAIN_NAME) }}
+      TF_VAR_support_email_destination: ${{ secrets.SUPPORT_EMAIL_DESTINATION }}
+      TF_VAR_contact_email_destination: ${{ secrets.CONTACT_EMAIL_DESTINATION }}
+      TF_VAR_vercel_project_name: ${{ secrets.VERCEL_PROJECT_NAME }}
       TF_VAR_github_repo: ${{ secrets.GITHUB_REPO || github.repository }}
       TF_VAR_vercel_team_id: ${{ secrets.VERCEL_TEAM_ID }}
       TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -69,79 +75,39 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Get Latest Workflow Run ID
-        id: get-run-id
-        if: github.event_name != 'pull_request'
-        uses: actions/github-script@v7
-        continue-on-error: true
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const core = require('@actions/core');
-            const branch = context.ref.replace('refs/heads/', '');
-            
-            try {
-              const workflowRuns = await github.rest.actions.listWorkflowRuns({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: 'terraform.yml',
-                branch: branch,
-                status: 'success',
-                per_page: 5
-              });
-              
-              if (workflowRuns.data.workflow_runs.length > 0) {
-                // Find the latest run that's not the current run and has artifacts
-                for (const run of workflowRuns.data.workflow_runs) {
-                  if (run.id !== context.runId) {
-                    // Check if this run has artifacts
-                    try {
-                      const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        run_id: run.id
-                      });
-                      
-                      const hasStateArtifact = artifacts.data.artifacts.some(
-                        artifact => artifact.name === 'terraform-state'
-                      );
-                      
-                      if (hasStateArtifact) {
-                        core.setOutput('run_id', run.id.toString());
-                        console.log(`Found previous successful run with state: ${run.id}`);
-                        return;
-                      }
-                    } catch (e) {
-                      console.log(`Could not check artifacts for run ${run.id}: ${e.message}`);
-                    }
-                  }
-                }
-                console.log('No previous run with state artifact found');
-              } else {
-                console.log('No previous successful runs found');
-              }
-            } catch (error) {
-              console.log(`Error finding previous run: ${error.message}`);
-              // Fail silently - this is the first run
-            }
+          fetch-depth: 0
+
+      - name: Verify setup is complete
+        id: check-setup
+        run: |
+          # Check if this is still the initial commit
+          COMMIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "1")
+          if [ "$COMMIT_COUNT" -le "1" ]; then
+            echo "::error::This appears to be the initial commit. Setup workflows must run first!"
+            echo "::error::Please wait for the initial-setup workflow to complete, then run Terraform manually via workflow_dispatch."
+            echo "::warning::Terraform requires secrets to be configured first. Check the welcome issue for instructions."
+            exit 1
+          fi
+          
+          # Also check if production environment exists (setup indicator)
+          echo "✅ Setup appears complete (commit count: $COMMIT_COUNT)"
+          echo "setup_complete=true" >> $GITHUB_OUTPUT
 
       - name: Download Terraform State (if exists)
         uses: dawidd6/action-download-artifact@v3
+        if: github.event_name != 'pull_request'
         id: download-state
-        if: github.event_name != 'pull_request' && steps.get-run-id.outcome == 'success' && steps.get-run-id.outputs.run_id != ''
         continue-on-error: true
         with:
           name: terraform-state
           path: ${{ env.WORKING_DIRECTORY }}/
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          run_id: ${{ steps.get-run-id.outputs.run_id }}
-          # Downloads from latest successful run of this workflow on the same branch
-          # Needed for terraform plan to work correctly
+          # Downloads from latest workflow run that has this artifact
           # On first run, this will fail silently (continue-on-error handles it)
 
       - name: Decrypt Terraform State (if exists)
-        if: steps.download-state.outcome == 'success'
+        if: github.event_name != 'pull_request' && steps.download-state.outcome == 'success'
         run: |
           if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" ]; then
             openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
@@ -192,21 +158,17 @@ jobs:
 
       - name: Terraform Apply
         id: apply
-        if: |
-          github.event.inputs.terraform_command == 'apply' && 
-          github.ref == 'refs/heads/main'
+        if: github.event.inputs.terraform_command == 'apply'
         run: terraform apply -auto-approve -no-color tfplan
 
       - name: Terraform Destroy
         id: destroy
-        if: |
-          github.event.inputs.terraform_command == 'destroy' && 
-          github.ref == 'refs/heads/main'
+        if: github.event.inputs.terraform_command == 'destroy'
         run: terraform destroy -auto-approve -no-color
 
       - name: Encrypt Terraform State
         if: |
-          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' && 
           always() && 
           (
             (github.event.inputs.terraform_command == 'apply' && steps.apply.outcome == 'success') || 
@@ -232,7 +194,7 @@ jobs:
 
       - name: Upload Encrypted Terraform State
         if: |
-          github.ref == 'refs/heads/main' &&
+          github.event_name != 'pull_request' && 
           always() && 
           (
             (github.event.inputs.terraform_command == 'apply' && steps.apply.outcome == 'success') || 

@@ -1,0 +1,175 @@
+name: Initial Repository Setup
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+jobs:
+  setup:
+    name: Initial Setup
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check if production environment exists
+        id: check-env
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              await github.rest.repos.getEnvironment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                environment_name: 'production'
+              });
+              core.setOutput('exists', 'true');
+              console.log('✅ Production environment already exists');
+            } catch (error) {
+              if (error.status === 404) {
+                core.setOutput('exists', 'false');
+                console.log('⚠️  Production environment does not exist - will create it');
+              } else {
+                throw error;
+              }
+            }
+
+      - name: Create Production Environment
+        if: steps.check-env.outputs.exists == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.repos.createOrUpdateEnvironment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              environment_name: 'production'
+            });
+            console.log('✅ Created production environment');
+
+      - name: Install GitHub CLI
+        if: steps.check-env.outputs.exists == 'false'
+        uses: actions/setup-gh@v3
+
+      - name: Generate TERRAFORM_STATE_PASSWORD
+        if: steps.check-env.outputs.exists == 'false'
+        id: generate-password
+        run: |
+          PASSWORD=$(openssl rand -base64 32)
+          echo "password=$PASSWORD" >> $GITHUB_OUTPUT
+          echo "✅ Generated TERRAFORM_STATE_PASSWORD"
+
+      - name: Set TERRAFORM_STATE_PASSWORD Secret
+        if: steps.check-env.outputs.exists == 'false'
+        id: set-password
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -n "$GH_PAT" ]; then
+            echo "${{ steps.generate-password.outputs.password }}" | gh secret set TERRAFORM_STATE_PASSWORD --env production --repo "${{ github.repository }}"
+            echo "✅ Set TERRAFORM_STATE_PASSWORD secret"
+          else
+            echo "⚠️  GH_PAT not provided, skipping auto-set of TERRAFORM_STATE_PASSWORD"
+            echo "skipped=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger Setup Validation Workflow
+        if: steps.check-env.outputs.exists == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Trigger the setup workflow to validate secrets
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'setup.yml',
+                ref: context.ref,
+                inputs: {
+                  setup_mode: 'validate'
+                }
+              });
+              console.log('✅ Triggered setup validation workflow');
+            } catch (error) {
+              console.log('⚠️  Could not trigger setup workflow (may not have secrets yet):', error.message);
+            }
+
+      - name: Create Welcome Issue with Secret Instructions
+        if: steps.check-env.outputs.exists == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const passwordValue = '${{ steps.generate-password.outputs.password }}';
+            const setPasswordSkipped = '${{ steps.set-password.outputs.skipped }}' === 'true';
+            const passwordSet = !setPasswordSkipped && '${{ steps.set-password.outcome }}' === 'success';
+            const passwordDisplay = passwordSet ? '✅ (auto-set)' : `\`${passwordValue}\` (copy this value)`;
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚀 Welcome! Configure Your Secrets to Get Started',
+              body: '# Welcome to Your New Repository!\n\n' +
+                'This repository was created from a template. Follow these steps to configure your secrets and deploy.\n\n' +
+                '## ✅ Auto-Setup Complete\n\n' +
+                '- ✅ Production environment created\n' +
+                `- ✅ TERRAFORM_STATE_PASSWORD: ${passwordDisplay}\n\n` +
+                '## 🔐 Step 1: Generate and Configure Secrets\n\n' +
+                '**Go to:** Settings → Environments → production → Add secret\n\n' +
+                '### Required Secrets (Generate These First)\n\n' +
+                '#### Cloudflare\n' +
+                '- **`CLOUDFLARE_API_TOKEN`** - [Create API Token](https://dash.cloudflare.com/profile/api-tokens)\n' +
+                '  - Permissions: Zone:Read, DNS:Edit, Zone Settings:Edit\n' +
+                '  - Account Resources: Include All accounts\n\n' +
+                '#### Vercel\n' +
+                '- **`VERCEL_API_TOKEN`** - [Create API Token](https://vercel.com/account/tokens)\n' +
+                '  - Full access token from Vercel dashboard\n\n' +
+                '#### Supabase\n' +
+                '- **`SUPABASE_URL`** - Your project URL from [Supabase Dashboard](https://supabase.com/dashboard)\n' +
+                '  - Format: `https://xxxxx.supabase.co`\n' +
+                '- **`SUPABASE_ANON_KEY`** - [Get from API Settings](https://supabase.com/dashboard/project/_/settings/api)\n' +
+                '  - Public anon key (publishable)\n' +
+                '- **`SUPABASE_SERVICE_ROLE_KEY`** - [Get from API Settings](https://supabase.com/dashboard/project/_/settings/api)\n' +
+                '  - Service role key (secret - keep safe!)\n' +
+                '- **`SUPABASE_ACCESS_TOKEN`** - [Create Access Token](https://supabase.com/dashboard/account/tokens)\n' +
+                '  - Personal access token for CLI\n' +
+                '- **`SUPABASE_PROJECT_ID`** - Found in project settings URL\n' +
+                '  - Format: `abcdefghijklmnop`\n\n' +
+                '#### Domain & Infrastructure\n' +
+                '- **`DOMAIN_NAME`** - Your domain (e.g., `yourdomain.com`)\n' +
+                (passwordSet ? '' : `- **\`TERRAFORM_STATE_PASSWORD\`** - Use this value: \`${passwordValue}\`\n`) +
+                '\n### Optional Secrets\n\n' +
+                '- `SUPPORT_EMAIL_DESTINATION` - Email for support@ forwarding\n' +
+                '- `CONTACT_EMAIL_DESTINATION` - Email for contact@ and hello@ forwarding\n' +
+                '- `VERCEL_TEAM_ID` - Only if using Vercel team account\n' +
+                '- `CLOUDFLARE_ACCOUNT_ID` - Found in Cloudflare dashboard URL\n' +
+                '- `CLOUDFLARE_ZONE_NAME` - Your zone name (usually same as domain)\n\n' +
+                '## ✅ Step 2: Validate Your Secrets\n\n' +
+                'After adding all secrets:\n\n' +
+                '1. Go to **Actions** → **Repository Setup** → **Run workflow**\n' +
+                '2. Select `validate` mode\n' +
+                '3. Check the workflow run to see which secrets are missing\n\n' +
+                '## 🚀 Step 3: Deploy Infrastructure\n\n' +
+                'Once all secrets are validated:\n\n' +
+                '1. Go to **Actions** → **Terraform Infrastructure** → **Run workflow**\n' +
+                '2. Select `plan` command to preview changes\n' +
+                '3. Review the plan, then run `apply` to deploy\n\n' +
+                '## 📚 Need Help?\n\n' +
+                '- See [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md) for detailed instructions\n' +
+                '- Check workflow runs in Actions tab for validation results\n' +
+                '- All secrets must be in the `production` environment\n\n' +
+                '---\n\n' +
+                '**💡 Tip:** The setup validation workflow will show you exactly which secrets are missing!'
+            });
+
