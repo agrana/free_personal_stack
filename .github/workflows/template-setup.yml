@@ -1,14 +1,28 @@
 name: Template Repository Setup
 
 on:
+  push:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/**'
   repository_dispatch:
     types: [repository-created]
   workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
 
 jobs:
   setup:
     name: Setup New Repository from Template
     runs-on: ubuntu-latest
+    # Only run on first push or manual trigger
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || github.event.before == '0000000000000000000000000000000000000000'
     
     steps:
       - name: Checkout code
