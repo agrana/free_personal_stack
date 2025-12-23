@@ -19,6 +19,7 @@ jobs:
   setup:
     name: Setup Secrets Validation
     runs-on: ubuntu-latest
+    environment: production
     if: github.event.inputs.setup_mode == 'validate' || github.event.client_payload.setup_mode == 'validate'
     
     steps:
@@ -70,6 +71,7 @@ jobs:
   create-template:
     name: Create Secrets Template
     runs-on: ubuntu-latest
+    # Don't require environment for template creation
     if: github.event.inputs.setup_mode == 'create-template' || github.event.client_payload.setup_mode == 'create-template'
     
     steps:
@@ -176,6 +178,7 @@ jobs:
   auto-setup:
     name: Auto Setup Secrets and Environment
     runs-on: ubuntu-latest
+    environment: production
     if: github.event.inputs.setup_mode == 'auto-setup' || github.event.client_payload.setup_mode == 'auto-setup'
     
     steps:
