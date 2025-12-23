@@ -1,222 +1,72 @@
-name: Auto-Setup Check
+name: Repository Setup Trigger
 
 on:
-  push:
-    branches:
-      - main
+  repository_dispatch:
+    types: [repository-created]
   workflow_dispatch:
 
-permissions:
-  contents: write
-  issues: write
-
 jobs:
-  initial-setup:
-    name: Initial Repository Setup
+  trigger-setup:
+    name: Trigger Repository Setup
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      issues: write
-    # Runs on every push until setup is complete
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Check if Setup is Complete
-        id: check-secrets
-        continue-on-error: true
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
-          DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
-          TERRAFORM_STATE_PASSWORD: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
-        run: |
-          missing_secrets=()
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then missing_secrets+=("CLOUDFLARE_API_TOKEN"); fi
-          if [ -z "$VERCEL_API_TOKEN" ]; then missing_secrets+=("VERCEL_API_TOKEN"); fi
-          if [ -z "$SUPABASE_URL" ]; then missing_secrets+=("SUPABASE_URL"); fi
-          if [ -z "$SUPABASE_ANON_KEY" ]; then missing_secrets+=("SUPABASE_ANON_KEY"); fi
-          if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then missing_secrets+=("SUPABASE_SERVICE_ROLE_KEY"); fi
-          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then missing_secrets+=("SUPABASE_ACCESS_TOKEN"); fi
-          if [ -z "$SUPABASE_PROJECT_ID" ]; then missing_secrets+=("SUPABASE_PROJECT_ID"); fi
-          if [ -z "$DOMAIN_NAME" ]; then missing_secrets+=("DOMAIN_NAME"); fi
-          if [ -z "$TERRAFORM_STATE_PASSWORD" ]; then missing_secrets+=("TERRAFORM_STATE_PASSWORD"); fi
-          
-          if [ ${#missing_secrets[@]} -eq 0 ]; then
-            echo "setup_complete=true" >> $GITHUB_OUTPUT
-            echo "✅ All required secrets are configured!"
-          else
-            echo "setup_complete=false" >> $GITHUB_OUTPUT
-            echo "missing_secrets=${missing_secrets[*]}" >> $GITHUB_OUTPUT
-            echo "❌ Missing ${#missing_secrets[@]} required secrets"
-          fi
-
-      - name: Create Setup Issue
-        if: steps.check-secrets.outcome == 'success' && steps.check-secrets.outputs.setup_complete == 'false'
+      - name: Trigger Setup Workflow
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // Check if setup issue already exists
-            const issues = await github.rest.issues.listForRepo({
+            await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              state: 'open',
-              labels: 'setup'
+              workflow_id: 'setup.yml',
+              ref: context.ref,
+              inputs: {
+                setup_mode: 'create-template'
+              }
             });
-            
-            const setupIssueExists = issues.data.some(issue => 
-              issue.title.includes('Setup Required') || 
-              issue.title.includes('Configure GitHub Secrets')
-            );
-            
-            if (!setupIssueExists) {
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: '🚀 Setup Required: Configure GitHub Secrets',
-                body: '# Repository Setup Required\n\n' +
-                'This repository was created from a template. Follow these steps to configure your secrets.\n\n' +
-                '## Step 1: Create Production Environment\n\n' +
-                '1. Go to **Settings** → **Environments**\n' +
-                '2. Click **"New environment"**\n' +
-                '3. Name it: `production`\n' +
-                '4. Click **"Configure environment"**\n\n' +
-                '## Step 2: Add Required Secrets\n\n' +
-                'Go to the `production` environment and add these secrets:\n\n' +
-                '### Required (8 secrets)\n\n' +
-                '| Secret Name | Description | How to Get It |\n' +
-                '|------------|-------------|---------------|\n' +
-                '| `CLOUDFLARE_API_TOKEN` | Cloudflare API token | [Cloudflare Dashboard → API Tokens](https://dash.cloudflare.com/profile/api-tokens) |\n' +
-                '| `VERCEL_API_TOKEN` | Vercel API token | [Vercel Account → Tokens](https://vercel.com/account/tokens) |\n' +
-                '| `SUPABASE_URL` | Supabase project URL | Supabase Dashboard → Settings → API |\n' +
-                '| `SUPABASE_ANON_KEY` | Supabase anonymous key | Supabase Dashboard → Settings → API |\n' +
-                '| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key | Supabase Dashboard → Settings → API |\n' +
-                '| `SUPABASE_ACCESS_TOKEN` | Supabase access token | [Supabase Account → Tokens](https://supabase.com/dashboard/account/tokens) |\n' +
-                '| `SUPABASE_PROJECT_ID` | Supabase project ID | Supabase Dashboard → Settings → General |\n' +
-                '| `DOMAIN_NAME` | Your domain | Your domain name (e.g., `yourdomain.com`) |\n' +
-                '| `TERRAFORM_STATE_PASSWORD` | State encryption password | Generate with: `openssl rand -base64 32` |\n\n' +
-                '## Step 3: Validate Setup\n\n' +
-                '1. Go to **Actions** → **Repository Setup**\n' +
-                '2. Click **"Run workflow"**\n' +
-                '3. Select `validate` mode\n' +
-                '4. Click **"Run workflow"**\n\n' +
-                '## What\'s Auto-Inferred?\n\n' +
-                'You don\'t need to set these - they\'re automatically inferred:\n' +
-                '- `GITHUB_REPO` - From repository context\n' +
-                '- `VERCEL_PROJECT_NAME` - From domain name (sanitized)\n' +
-                '- `APP_URL` - From project name (`{project-name}.vercel.app`)\n' +
-                '- `SITE_URL` - From domain (`https://{domain-name}`)\n\n' +
-                '## Documentation\n\n' +
-                '- 📖 [.github/MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md) - Complete secrets guide\n' +
-                '- 📖 [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md) - Full setup instructions\n\n' +
-                '## Quick Links\n\n' +
-                '- 🔗 [Actions](https://github.com/' + context.repo.owner + '/' + context.repo.repo + '/actions)\n' +
-                '- 🔗 [Settings → Environments](https://github.com/' + context.repo.owner + '/' + context.repo.repo + '/settings/environments)\n' +
-                '- 🔗 [Settings → Secrets](https://github.com/' + context.repo.owner + '/' + context.repo.repo + '/settings/secrets/actions)\n\n' +
-                '---\n\n' +
-                '**Once all secrets are configured, you can run the Terraform workflow!** 🚀',
-                labels: ['setup', 'documentation']
-              });
-              
-              console.log('✅ Created setup issue');
-            } else {
-              console.log('ℹ️ Setup issue already exists - updating if needed');
-              // Optionally update existing issue with latest info
-            }
-          } else {
-            console.log('✅ Setup is complete - no issue needed');
-          }
 
-      - name: Generate Secrets Template
-        if: steps.check-secrets.outputs.setup_complete == 'false'
-        run: |
-          mkdir -p .github
-          cat > .github/SECRETS_EXAMPLE.md << 'EOF'
-          # Secrets Configuration Guide
-          
-          This file shows what secrets you need to configure.
-          
-          ## Quick Setup
-          
-          1. **Create Environment:** Settings → Environments → New environment → `production`
-          2. **Add Secrets:** Add each secret below to the `production` environment
-          3. **Validate:** Run "Repository Setup" workflow → `validate` mode
-          
-          ## Required Secrets (8 total)
-          
-          ### 1. CLOUDFLARE_API_TOKEN
-          - Get from: [Cloudflare Dashboard → API Tokens](https://dash.cloudflare.com/profile/api-tokens)
-          - Permissions needed: `Zone:Zone:Read`, `Zone:DNS:Edit`
-          - Example: `cf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
-          
-          ### 2. VERCEL_API_TOKEN
-          - Get from: [Vercel Account → Tokens](https://vercel.com/account/tokens)
-          - Example: `xxxxxxxxxxxxxxxxxxxx`
-          
-          ### 3. SUPABASE_URL
-          - Get from: Supabase Dashboard → Settings → API → Project URL
-          - Example: `https://xxxxxxxxxxxxx.supabase.co`
-          
-          ### 4. SUPABASE_ANON_KEY
-          - Get from: Supabase Dashboard → Settings → API → anon/public key
-          - Example: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`
-          
-          ### 5. SUPABASE_SERVICE_ROLE_KEY
-          - Get from: Supabase Dashboard → Settings → API → service_role key (click "Reveal")
-          - ⚠️ Keep this secret!
-          - Example: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`
-          
-          ### 6. SUPABASE_ACCESS_TOKEN
-          - Get from: [Supabase Account → Access Tokens](https://supabase.com/dashboard/account/tokens)
-          - This is a personal access token (different from API keys)
-          - Example: `sbp_xxxxxxxxxxxxxxxxxxxx`
-          
-          ### 7. SUPABASE_PROJECT_ID
-          - Get from: Supabase Dashboard → Settings → General → Reference ID
-          - Example: `xxxxxxxxxxxxx`
-          
-          ### 8. DOMAIN_NAME
-          - Your domain name
-          - Example: `yourdomain.com` or `subdomain.yourdomain.com`
-          
-          ### 9. TERRAFORM_STATE_PASSWORD
-          - Generate a secure password:
-            \`\`\`bash
-            openssl rand -base64 32
-            \`\`\`
-          - Example output: `Kx8mP2vQ9rT4nL6jH8fD1sA3bC5eG7hI9jK0lM2nP4qR6sT8uV0wX2yZ4aB6cD`
-          
-          ## Auto-Inferred (No Need to Set)
-          
-          These are automatically inferred - you don't need to configure them:
-          
-          - ✅ `GITHUB_REPO` - From `github.repository` context
-          - ✅ `VERCEL_PROJECT_NAME` - From domain name (sanitized)
-          - ✅ `APP_URL` - From project name (`{project-name}.vercel.app`)
-          - ✅ `SITE_URL` - From domain (`https://{domain-name}`)
-          
-          ## Validation
-          
-          After adding secrets, run the "Repository Setup" workflow with `validate` mode to check if all secrets are configured correctly.
-          
-          See [.github/MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md) for more details.
-          EOF
-          
-          echo "📝 Created .github/SECRETS_EXAMPLE.md"
-
-      - name: Commit Setup Files
-        if: steps.check-secrets.outputs.setup_complete == 'false'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .github/SECRETS_EXAMPLE.md || true
-          git diff --staged --quiet || git commit -m "Add secrets configuration guide" || exit 0
-          git push || exit 0
+      - name: Create Initial Issue
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚀 Welcome! Repository Setup Required',
+              body: '# Welcome to Your New Repository!\n\n' +
+                'This repository was created from a template. Follow these steps to get started:\n\n' +
+                '## Quick Start\n\n' +
+                '1. **Configure GitHub Secrets**\n' +
+                '   - Go to **Settings** → **Environments** → **New environment** → `production`\n' +
+                '   - Add all required secrets (see below)\n\n' +
+                '2. **Run Setup Validation**\n' +
+                '   - Go to **Actions** → **Repository Setup** → **Run workflow**\n' +
+                '   - Select `validate` mode to check your secrets\n\n' +
+                '3. **Deploy Infrastructure**\n' +
+                '   - Once secrets are validated, run **Terraform Infrastructure** workflow\n' +
+                '   - Start with `plan` command to preview changes\n\n' +
+                '## Required Secrets\n\n' +
+                'You need to configure these secrets in the `production` environment:\n\n' +
+                '- `CLOUDFLARE_API_TOKEN` - Your Cloudflare API token\n' +
+                '- `VERCEL_API_TOKEN` - Your Vercel API token\n' +
+                '- `SUPABASE_URL` - Your Supabase project URL\n' +
+                '- `SUPABASE_ANON_KEY` - Supabase anonymous key\n' +
+                '- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key\n' +
+                '- `SUPABASE_ACCESS_TOKEN` - Supabase access token\n' +
+                '- `SUPABASE_PROJECT_ID` - Supabase project ID\n' +
+                '- `DOMAIN_NAME` - Your domain name\n' +
+                '- `TERRAFORM_STATE_PASSWORD` - Generate with: `openssl rand -base64 32`\n\n' +
+                '## Next Steps\n\n' +
+                '- [ ] Create `production` environment in GitHub\n' +
+                '- [ ] Add all required secrets\n' +
+                '- [ ] Run "Repository Setup" workflow → "validate" mode\n' +
+                '- [ ] Run "Terraform Infrastructure" workflow → "plan" command\n' +
+                '- [ ] Review the plan and run "apply" when ready\n\n' +
+                'For detailed instructions, see [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md)'
+            });
 

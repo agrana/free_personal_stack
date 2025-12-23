@@ -12,19 +12,13 @@ on:
         options:
           - validate
           - create-template
+          - auto-setup
         default: validate
-
-permissions:
-  contents: write
-  issues: write
 
 jobs:
   setup:
     name: Setup Secrets Validation
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: write
     if: github.event.inputs.setup_mode == 'validate' || github.event.client_payload.setup_mode == 'validate'
     
     steps:
@@ -76,7 +70,6 @@ jobs:
   create-template:
     name: Create Secrets Template
     runs-on: ubuntu-latest
-    # Permissions inherited from workflow level
     if: github.event.inputs.setup_mode == 'create-template' || github.event.client_payload.setup_mode == 'create-template'
     
     steps:
