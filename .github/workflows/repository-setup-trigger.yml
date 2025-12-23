@@ -25,7 +25,7 @@ jobs:
               workflow_id: 'setup.yml',
               ref: context.ref,
               inputs: {
-                setup_mode: 'create-template'
+                setup_mode: 'auto-setup'
               }
             });
 
