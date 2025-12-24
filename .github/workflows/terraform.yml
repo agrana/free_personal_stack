@@ -28,15 +28,15 @@ env:
   WORKING_DIRECTORY: './terraform'
 
 jobs:
-  terraform:
-    name: Terraform ${{ github.event.inputs.terraform_command || 'plan' }}
+  plan:
+    name: Terraform Plan
     runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
     # Skip on initial commit - setup workflows need to run first
     # Only allow manual dispatch, PRs, or pushes that are NOT the initial commit
     # Initial commits have before SHA as all zeros or empty/null
     if: |
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_command != 'apply' && github.event.inputs.terraform_command != 'destroy') ||
       github.event_name == 'pull_request' ||
       (github.event_name == 'push' && 
        github.event.before != null && 
@@ -148,7 +148,6 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        if: github.event.inputs.terraform_command == 'plan' || github.event.inputs.terraform_command == 'apply' || github.event_name == 'push' || github.event_name == 'pull_request'
         run: terraform plan -no-color -out=tfplan
         continue-on-error: true
 
@@ -156,59 +155,14 @@ jobs:
         if: steps.plan.outcome == 'failure'
         run: exit 1
 
-      - name: Terraform Apply
-        id: apply
-        if: github.event.inputs.terraform_command == 'apply'
-        run: terraform apply -auto-approve -no-color tfplan
-
-      - name: Terraform Destroy
-        id: destroy
-        if: github.event.inputs.terraform_command == 'destroy'
-        run: terraform destroy -auto-approve -no-color
-
-      - name: Encrypt Terraform State
-        if: |
-          github.event_name != 'pull_request' && 
-          always() && 
-          (
-            (github.event.inputs.terraform_command == 'apply' && steps.apply.outcome == 'success') || 
-            (github.event.inputs.terraform_command == 'destroy' && steps.destroy.outcome == 'success')
-          )
-        run: |
-          # Encrypt state file if it exists
-          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" ]; then
-            openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" \
-              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "State file encrypted successfully"
-          fi
-          # Encrypt backup file if it exists
-          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup" ]; then
-            openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup" \
-              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "State backup file encrypted successfully"
-          fi
-
-      - name: Upload Encrypted Terraform State
-        if: |
-          github.event_name != 'pull_request' && 
-          always() && 
-          (
-            (github.event.inputs.terraform_command == 'apply' && steps.apply.outcome == 'success') || 
-            (github.event.inputs.terraform_command == 'destroy' && steps.destroy.outcome == 'success')
-          )
+      - name: Upload Plan Artifact
+        if: steps.plan.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-state
-          path: |
-            ${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted
-            ${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted
-          retention-days: 400
+          name: terraform-plan
+          path: ${{ env.WORKING_DIRECTORY }}/tfplan
+          retention-days: 7
           if-no-files-found: ignore
-          overwrite: true
 
       - name: Comment PR
         uses: actions/github-script@v7
@@ -243,4 +197,204 @@ jobs:
               repo: context.repo.repo,
               body: output
             })
+
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: plan
+    environment: 
+      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+      # Require manual approval for apply
+      # Go to Settings → Environments → production → Add protection rule → Required reviewers
+    if: github.event.inputs.terraform_command == 'apply'
+    
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+    
+    env:
+      # Terraform variables from GitHub Secrets
+      TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TF_VAR_vercel_api_token: ${{ secrets.VERCEL_API_TOKEN }}
+      TF_VAR_supabase_url: ${{ secrets.SUPABASE_URL }}
+      TF_VAR_supabase_anon_key: ${{ secrets.SUPABASE_ANON_KEY }}
+      TF_VAR_supabase_service_role_key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      TF_VAR_supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      TF_VAR_supabase_project_id: ${{ secrets.SUPABASE_PROJECT_ID }}
+      TF_VAR_domain_name: ${{ secrets.DOMAIN_NAME }}
+      TF_VAR_app_url: ${{ secrets.APP_URL }}
+      TF_VAR_site_url: ${{ secrets.SITE_URL || format('https://{0}', secrets.DOMAIN_NAME) }}
+      TF_VAR_support_email_destination: ${{ secrets.SUPPORT_EMAIL_DESTINATION }}
+      TF_VAR_contact_email_destination: ${{ secrets.CONTACT_EMAIL_DESTINATION }}
+      TF_VAR_vercel_project_name: ${{ secrets.VERCEL_PROJECT_NAME }}
+      TF_VAR_github_repo: ${{ secrets.GITHUB_REPO || github.repository }}
+      TF_VAR_vercel_team_id: ${{ secrets.VERCEL_TEAM_ID }}
+      TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TF_VAR_cloudflare_zone_name: ${{ secrets.CLOUDFLARE_ZONE_NAME }}
+      TF_VAR_enable_email_routing: ${{ secrets.ENABLE_EMAIL_ROUTING || 'true' }}
+      TF_VAR_create_cloudflare_zone: ${{ secrets.CREATE_CLOUDFLARE_ZONE || 'false' }}
+      TF_VAR_enable_supabase_project_deletion: ${{ secrets.ENABLE_SUPABASE_PROJECT_DELETION || 'true' }}
+      TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
+      TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Terraform State (if exists)
+        uses: dawidd6/action-download-artifact@v3
+        id: download-state
+        continue-on-error: true
+        with:
+          name: terraform-state
+          path: ${{ env.WORKING_DIRECTORY }}/
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decrypt Terraform State (if exists)
+        if: steps.download-state.outcome == 'success'
+        run: |
+          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
+              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" \
+              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" \
+              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
+            echo "State file decrypted successfully"
+          fi
+          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted" ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
+              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted" \
+              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup" \
+              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
+            echo "State backup file decrypted successfully"
+          fi
+        continue-on-error: true
+
+      - name: Download Plan Artifact
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          name: terraform-plan
+          path: ${{ env.WORKING_DIRECTORY }}/
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        id: apply
+        run: terraform apply -auto-approve -no-color tfplan
+
+      - name: Encrypt Terraform State
+        if: always() && steps.apply.outcome == 'success'
+        run: |
+          # Encrypt state file if it exists
+          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" ]; then
+            openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
+              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" \
+              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" \
+              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
+            echo "State file encrypted successfully"
+          fi
+          # Encrypt backup file if it exists
+          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup" ]; then
+            openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
+              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup" \
+              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted" \
+              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
+            echo "State backup file encrypted successfully"
+          fi
+
+      - name: Upload Encrypted Terraform State
+        if: always() && steps.apply.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-state
+          path: |
+            ${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted
+            ${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted
+          retention-days: 400
+          if-no-files-found: ignore
+          overwrite: true
+
+  destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    environment: 
+      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+      # Require manual approval for destroy
+    if: github.event.inputs.terraform_command == 'destroy'
+    
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+    
+    env:
+      # Same env vars as plan job
+      TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TF_VAR_vercel_api_token: ${{ secrets.VERCEL_API_TOKEN }}
+      TF_VAR_supabase_url: ${{ secrets.SUPABASE_URL }}
+      TF_VAR_supabase_anon_key: ${{ secrets.SUPABASE_ANON_KEY }}
+      TF_VAR_supabase_service_role_key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      TF_VAR_supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      TF_VAR_supabase_project_id: ${{ secrets.SUPABASE_PROJECT_ID }}
+      TF_VAR_domain_name: ${{ secrets.DOMAIN_NAME }}
+      TF_VAR_app_url: ${{ secrets.APP_URL }}
+      TF_VAR_site_url: ${{ secrets.SITE_URL || format('https://{0}', secrets.DOMAIN_NAME) }}
+      TF_VAR_support_email_destination: ${{ secrets.SUPPORT_EMAIL_DESTINATION }}
+      TF_VAR_contact_email_destination: ${{ secrets.CONTACT_EMAIL_DESTINATION }}
+      TF_VAR_vercel_project_name: ${{ secrets.VERCEL_PROJECT_NAME }}
+      TF_VAR_github_repo: ${{ secrets.GITHUB_REPO || github.repository }}
+      TF_VAR_vercel_team_id: ${{ secrets.VERCEL_TEAM_ID }}
+      TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TF_VAR_cloudflare_zone_name: ${{ secrets.CLOUDFLARE_ZONE_NAME }}
+      TF_VAR_enable_email_routing: ${{ secrets.ENABLE_EMAIL_ROUTING || 'true' }}
+      TF_VAR_create_cloudflare_zone: ${{ secrets.CREATE_CLOUDFLARE_ZONE || 'false' }}
+      TF_VAR_enable_supabase_project_deletion: ${{ secrets.ENABLE_SUPABASE_PROJECT_DELETION || 'true' }}
+      TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
+      TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Terraform State (if exists)
+        uses: dawidd6/action-download-artifact@v3
+        id: download-state
+        continue-on-error: true
+        with:
+          name: terraform-state
+          path: ${{ env.WORKING_DIRECTORY }}/
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decrypt Terraform State (if exists)
+        if: steps.download-state.outcome == 'success'
+        run: |
+          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
+              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" \
+              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" \
+              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
+          fi
+        continue-on-error: true
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Destroy
+        id: destroy
+        run: terraform destroy -auto-approve -no-color
+
 

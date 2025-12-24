@@ -41,8 +41,15 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           
           missing_secrets=()
+          invalid_secrets=()
           
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then missing_secrets+=("CLOUDFLARE_API_TOKEN"); fi
+          # Check if secrets are set
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then 
+            missing_secrets+=("CLOUDFLARE_API_TOKEN")
+          elif [ ${#CLOUDFLARE_API_TOKEN} -ne 40 ] || ! echo "$CLOUDFLARE_API_TOKEN" | grep -qE '^[a-zA-Z0-9_-]+$'; then
+            invalid_secrets+=("CLOUDFLARE_API_TOKEN (must be exactly 40 characters, alphanumeric, hyphens, underscores only)")
+          fi
+          
           if [ -z "$VERCEL_API_TOKEN" ]; then missing_secrets+=("VERCEL_API_TOKEN"); fi
           if [ -z "$SUPABASE_URL" ]; then missing_secrets+=("SUPABASE_URL"); fi
           if [ -z "$SUPABASE_ANON_KEY" ]; then missing_secrets+=("SUPABASE_ANON_KEY"); fi
@@ -52,18 +59,39 @@ jobs:
           if [ -z "$DOMAIN_NAME" ]; then missing_secrets+=("DOMAIN_NAME"); fi
           if [ -z "$TERRAFORM_STATE_PASSWORD" ]; then missing_secrets+=("TERRAFORM_STATE_PASSWORD"); fi
           
+          # Report invalid secrets
+          if [ ${#invalid_secrets[@]} -gt 0 ]; then
+            echo "::error title=Invalid Secret Format::One or more secrets have invalid format" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Invalid secret format (${#invalid_secrets[@]}):" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            for secret in "${invalid_secrets[@]}"; do
+              echo "- \`$secret\`" >> $GITHUB_STEP_SUMMARY
+            done
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### How to Fix:" >> $GITHUB_STEP_SUMMARY
+            echo "1. Go to **Settings** → **Environments** → **production**" >> $GITHUB_STEP_SUMMARY
+            echo "2. Update the secret with a valid value" >> $GITHUB_STEP_SUMMARY
+            echo "3. For CLOUDFLARE_API_TOKEN: Must be exactly 40 characters, alphanumeric, hyphens, or underscores only" >> $GITHUB_STEP_SUMMARY
+            echo "4. Re-run this workflow to validate" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
           if [ ${#missing_secrets[@]} -eq 0 ]; then
             echo "✅ All required secrets are configured!" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "You can now run the Terraform workflow." >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Missing required secrets:" >> $GITHUB_STEP_SUMMARY
+            echo "::error title=Missing Required Secrets::${#missing_secrets[@]} required secret(s) are missing" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Missing required secrets (${#missing_secrets[@]}):" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             for secret in "${missing_secrets[@]}"; do
               echo "- \`$secret\`" >> $GITHUB_STEP_SUMMARY
             done
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "👉 See [.github/MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md) for setup instructions." >> $GITHUB_STEP_SUMMARY
+            echo "### How to Fix:" >> $GITHUB_STEP_SUMMARY
+            echo "1. Go to **Settings** → **Environments** → **production**" >> $GITHUB_STEP_SUMMARY
+            echo "2. Click **Add secret** and add each of the missing secrets listed above." >> $GITHUB_STEP_SUMMARY
+            echo "3. Re-run this workflow in 'validate' mode to confirm all secrets are set." >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
