@@ -113,6 +113,7 @@ variable "nextauth_secret" {
   type        = string
   sensitive   = true
   default     = ""
+  nullable    = true
 }
 
 # Supabase Configuration
