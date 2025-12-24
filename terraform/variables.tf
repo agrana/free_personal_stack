@@ -112,9 +112,11 @@ variable "google_client_secret" {
 
 # NextAuth Configuration
 variable "nextauth_secret" {
-  description = "NextAuth secret key"
+  description = "NextAuth secret key (auto-generated if not provided)"
   type        = string
   sensitive   = true
+  default     = ""
+  nullable    = true
 }
 
 # Supabase Configuration
