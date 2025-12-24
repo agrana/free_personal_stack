@@ -58,13 +58,38 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "You can now run the Terraform workflow." >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Missing required secrets:" >> $GITHUB_STEP_SUMMARY
+            echo "## ❌ Validation Failed: Missing Required Secrets" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The following **${#missing_secrets[@]} required secret(s)** are missing from the \`production\` environment:" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             for secret in "${missing_secrets[@]}"; do
-              echo "- \`$secret\`" >> $GITHUB_STEP_SUMMARY
+              echo "- ❌ \`$secret\`" >> $GITHUB_STEP_SUMMARY
             done
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "👉 See [.github/MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md) for setup instructions." >> $GITHUB_STEP_SUMMARY
+            echo "## 🔧 How to Fix" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "1. **Go to your repository settings:**" >> $GITHUB_STEP_SUMMARY
+            echo "   - Navigate to: **Settings** → **Environments** → **production**" >> $GITHUB_STEP_SUMMARY
+            echo "   - If the \`production\` environment doesn't exist, create it first" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "2. **Add each missing secret:**" >> $GITHUB_STEP_SUMMARY
+            echo "   - Click **Add secret** for each missing secret listed above" >> $GITHUB_STEP_SUMMARY
+            echo "   - See the welcome issue in this repository for links to generate each secret" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "3. **Re-run this validation:**" >> $GITHUB_STEP_SUMMARY
+            echo "   - Go to **Actions** → **Repository Setup** → **Run workflow**" >> $GITHUB_STEP_SUMMARY
+            echo "   - Select \`validate\` mode to check again" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## 📚 Need Help?" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- Check the welcome issue for detailed instructions and links to generate secrets" >> $GITHUB_STEP_SUMMARY
+            echo "- See [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md) for complete setup guide" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "---" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Note:** All secrets must be added to the \`production\` environment, not repository-level secrets." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "::error::Validation failed: ${#missing_secrets[@]} required secret(s) are missing from the production environment. Add them and re-run validation."
             exit 1
           fi
 
