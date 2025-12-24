@@ -57,15 +57,18 @@ jobs:
       TF_VAR_supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       TF_VAR_supabase_project_id: ${{ secrets.SUPABASE_PROJECT_ID }}
       TF_VAR_domain_name: ${{ secrets.DOMAIN_NAME }}
-      TF_VAR_app_url: ${{ secrets.APP_URL }}
+      # Derive app_url from vercel_project_name if not provided
+      TF_VAR_app_url: ${{ secrets.APP_URL || format('{0}.vercel.app', secrets.VERCEL_PROJECT_NAME || replace(secrets.DOMAIN_NAME, '.', '-')) }}
       TF_VAR_site_url: ${{ secrets.SITE_URL || format('https://{0}', secrets.DOMAIN_NAME) }}
       TF_VAR_support_email_destination: ${{ secrets.SUPPORT_EMAIL_DESTINATION }}
       TF_VAR_contact_email_destination: ${{ secrets.CONTACT_EMAIL_DESTINATION }}
-      TF_VAR_vercel_project_name: ${{ secrets.VERCEL_PROJECT_NAME }}
+      # Derive vercel_project_name from domain_name if not provided (replace dots with hyphens)
+      TF_VAR_vercel_project_name: ${{ secrets.VERCEL_PROJECT_NAME || replace(secrets.DOMAIN_NAME, '.', '-') }}
       TF_VAR_github_repo: ${{ secrets.GITHUB_REPO || github.repository }}
       TF_VAR_vercel_team_id: ${{ secrets.VERCEL_TEAM_ID }}
       TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TF_VAR_cloudflare_zone_name: ${{ secrets.CLOUDFLARE_ZONE_NAME }}
+      # Derive cloudflare_zone_name from domain_name (parent zone)
+      TF_VAR_cloudflare_zone_name: ${{ secrets.CLOUDFLARE_ZONE_NAME || secrets.DOMAIN_NAME }}
       TF_VAR_enable_email_routing: ${{ secrets.ENABLE_EMAIL_ROUTING || 'true' }}
       TF_VAR_create_cloudflare_zone: ${{ secrets.CREATE_CLOUDFLARE_ZONE || 'false' }}
       TF_VAR_enable_supabase_project_deletion: ${{ secrets.ENABLE_SUPABASE_PROJECT_DELETION || 'true' }}
@@ -140,15 +143,35 @@ jobs:
         run: terraform fmt -check
         continue-on-error: true
 
+      - name: Generate NextAuth Secret (if not provided)
+        id: generate-nextauth
+        env:
+          NEXTAUTH_SECRET_FROM_SECRETS: ${{ secrets.NEXTAUTH_SECRET }}
+        run: |
+          if [ -z "$NEXTAUTH_SECRET_FROM_SECRETS" ]; then
+            NEXTAUTH_SECRET=$(openssl rand -base64 32)
+            echo "nextauth_secret=$NEXTAUTH_SECRET" >> $GITHUB_ENV
+            echo "✅ Generated NEXTAUTH_SECRET (not set in secrets)"
+          else
+            echo "nextauth_secret=$NEXTAUTH_SECRET_FROM_SECRETS" >> $GITHUB_ENV
+            echo "✅ Using NEXTAUTH_SECRET from secrets"
+          fi
+
       - name: Terraform Init
+        env:
+          TF_VAR_nextauth_secret: ${{ env.NEXTAUTH_SECRET || secrets.NEXTAUTH_SECRET || '' }}
         run: terraform init
 
       - name: Terraform Validate
+        env:
+          TF_VAR_nextauth_secret: ${{ env.NEXTAUTH_SECRET || secrets.NEXTAUTH_SECRET || '' }}
         run: terraform validate -no-color
 
       - name: Terraform Plan
         id: plan
         if: github.event.inputs.terraform_command == 'plan' || github.event.inputs.terraform_command == 'apply' || github.event_name == 'push' || github.event_name == 'pull_request'
+        env:
+          TF_VAR_nextauth_secret: ${{ env.NEXTAUTH_SECRET || secrets.NEXTAUTH_SECRET || '' }}
         run: terraform plan -no-color -out=tfplan
         continue-on-error: true
 
@@ -159,11 +182,15 @@ jobs:
       - name: Terraform Apply
         id: apply
         if: github.event.inputs.terraform_command == 'apply'
+        env:
+          TF_VAR_nextauth_secret: ${{ env.NEXTAUTH_SECRET || secrets.NEXTAUTH_SECRET || '' }}
         run: terraform apply -auto-approve -no-color tfplan
 
       - name: Terraform Destroy
         id: destroy
         if: github.event.inputs.terraform_command == 'destroy'
+        env:
+          TF_VAR_nextauth_secret: ${{ env.NEXTAUTH_SECRET || secrets.NEXTAUTH_SECRET || '' }}
         run: terraform destroy -auto-approve -no-color
 
       - name: Encrypt Terraform State

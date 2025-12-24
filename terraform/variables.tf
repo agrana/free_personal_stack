@@ -4,9 +4,8 @@ variable "domain_name" {
 }
 
 variable "app_url" {
-  description = "The URL where your app is hosted (e.g., myproject.vercel.app). If empty, inferred from vercel_project_name"
+  description = "The URL where your app is hosted (e.g., myproject.vercel.app)"
   type        = string
-  default     = ""
 }
 
 variable "support_email_destination" {
@@ -65,15 +64,14 @@ variable "vercel_team_id" {
 }
 
 variable "vercel_project_name" {
-  description = "Name of the Vercel project (if empty, inferred from domain_name by removing dots and special chars)"
+  description = "Name of the Vercel project"
   type        = string
   default     = ""
 }
 
 variable "github_repo" {
-  description = "GitHub repository in format 'owner/repo'. In GitHub Actions, can be inferred from github.repository context"
+  description = "GitHub repository in format 'owner/repo'"
   type        = string
-  default     = ""
 }
 
 # Supabase Configuration
@@ -107,14 +105,14 @@ variable "google_client_secret" {
   description = "Google OAuth client secret"
   type        = string
   sensitive   = true
-  default     = ""
 }
 
 # NextAuth Configuration
 variable "nextauth_secret" {
-  description = "NextAuth secret key"
+  description = "NextAuth secret key (auto-generated if not provided)"
   type        = string
   sensitive   = true
+  default     = ""
 }
 
 # Supabase Configuration
@@ -130,17 +128,7 @@ variable "supabase_project_id" {
 }
 
 variable "enable_supabase_project_deletion" {
-  description = <<-EOT
-    Enable automatic Supabase project deletion via CLI when running terraform destroy.
-    Requires Supabase CLI installed (npm install -g supabase or via npx) and supabase_access_token set.
-    
-    ⚠️  WARNING: When enabled (default: true), running terraform destroy will:
-    - Delete your Supabase project permanently
-    - Delete all data in the project
-    - This action CANNOT be undone!
-    
-    Set to false if you want to manage Supabase project deletion manually.
-  EOT
+  description = "Enable automatic Supabase project deletion via CLI when running terraform destroy. Requires Supabase CLI installed and supabase_access_token set. WARNING: This will delete your Supabase project and all data when you run terraform destroy!"
   type        = bool
   default     = true
 }

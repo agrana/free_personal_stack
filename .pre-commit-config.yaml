@@ -30,6 +30,8 @@ repos:
       - id: terraform_validate
         args:
           - --args=-json
+        env:
+          TF_VAR_nextauth_secret: ""
 
       # Terraform security scanning
       - id: terraform_tflint

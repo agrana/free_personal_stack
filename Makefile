@@ -43,9 +43,9 @@ clean: ## Clean up Terraform files (use with caution)
 	@echo "🧹 Cleaning up Terraform files..."
 	@cd terraform && rm -rf .terraform .terraform.lock.hcl terraform.tfstate*
 
-validate: ## Validate Terraform configuration
+validate: ## Validate Terraform configuration (format, init, validate)
 	@echo "✅ Validating Terraform configuration..."
-	@cd terraform && terraform validate
+	@.github/scripts/validate-terraform.sh
 
 format: ## Format Terraform files
 	@echo "🎨 Formatting Terraform files..."
