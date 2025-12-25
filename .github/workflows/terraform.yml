@@ -215,13 +215,19 @@ jobs:
             }
             
             // Use the best apply run if found (preferred)
+            // Since we break after finding the first apply, bestApplyRun is the most recent successful apply
             if (bestApplyRun) {
               console.log(`\n✅ Found successful apply with state artifact`);
               console.log(`   Using run ${bestApplyRun.run_id} (Apply succeeded, State size: ${bestApplyRun.artifact_size} bytes)`);
+              console.log(`   This is the most recent successful apply run`);
               core.setOutput('run_id', bestApplyRun.run_id.toString());
               core.setOutput('artifact_id', bestApplyRun.artifact_id.toString());
               return;
             }
+            
+            console.log(`\n⚠️  No successful apply runs found with state artifacts`);
+            console.log(`   Searched through ${runs.workflow_runs.length} workflow runs`);
+            console.log(`   Check the logs above to see which runs were checked and why apply wasn't found`);
             
             // Fallback to destroy run if no apply found
             if (bestDestroyRun) {
@@ -721,13 +727,19 @@ jobs:
             }
             
             // Use the best apply run if found (preferred)
+            // Since we break after finding the first apply, bestApplyRun is the most recent successful apply
             if (bestApplyRun) {
               console.log(`\n✅ Found successful apply with state artifact`);
               console.log(`   Using run ${bestApplyRun.run_id} (Apply succeeded, State size: ${bestApplyRun.artifact_size} bytes)`);
+              console.log(`   This is the most recent successful apply run`);
               core.setOutput('run_id', bestApplyRun.run_id.toString());
               core.setOutput('artifact_id', bestApplyRun.artifact_id.toString());
               return;
             }
+            
+            console.log(`\n⚠️  No successful apply runs found with state artifacts`);
+            console.log(`   Searched through ${runs.workflow_runs.length} workflow runs`);
+            console.log(`   Check the logs above to see which runs were checked and why apply wasn't found`);
             
             // Fallback to destroy run if no apply found
             if (bestDestroyRun) {
@@ -1081,13 +1093,19 @@ jobs:
             }
             
             // Use the best apply run if found (preferred)
+            // Since we break after finding the first apply, bestApplyRun is the most recent successful apply
             if (bestApplyRun) {
               console.log(`\n✅ Found successful apply with state artifact`);
               console.log(`   Using run ${bestApplyRun.run_id} (Apply succeeded, State size: ${bestApplyRun.artifact_size} bytes)`);
+              console.log(`   This is the most recent successful apply run`);
               core.setOutput('run_id', bestApplyRun.run_id.toString());
               core.setOutput('artifact_id', bestApplyRun.artifact_id.toString());
               return;
             }
+            
+            console.log(`\n⚠️  No successful apply runs found with state artifacts`);
+            console.log(`   Searched through ${runs.workflow_runs.length} workflow runs`);
+            console.log(`   Check the logs above to see which runs were checked and why apply wasn't found`);
             
             // Fallback to destroy run if no apply found
             if (bestDestroyRun) {
