@@ -342,7 +342,9 @@ jobs:
     environment: 
       name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
       # Require manual approval for destroy
-    if: github.event.inputs.terraform_command == 'destroy'
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.terraform_command == 'destroy'
     
     defaults:
       run:
