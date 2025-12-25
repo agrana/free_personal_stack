@@ -180,7 +180,7 @@ export default function VerificationDashboard() {
             🎉 Everything is Working!
           </h3>
           <p className="text-green-800 mb-3">
-            Your infrastructure is fully configured and operational. You're ready
+            Your infrastructure is fully configured and operational. You&apos;re ready
             to start building your application.
           </p>
           <ul className="text-green-700 space-y-1 text-sm">

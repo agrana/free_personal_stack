@@ -171,7 +171,7 @@ export default function AuthVerification({
           <div className="mt-3 p-3 bg-yellow-50 rounded border border-yellow-200">
             <p className="text-sm text-yellow-800">
               <strong>Note:</strong> You need to be signed in to verify
-              authentication. This is expected if you're not logged in.
+              authentication. This is expected if you&apos;re not logged in.
             </p>
           </div>
         )}

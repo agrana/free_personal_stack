@@ -115,7 +115,7 @@ export default function EmailRoutingVerification({
           <div className="p-3 bg-yellow-50 rounded border border-yellow-200">
             <p className="text-sm text-yellow-800">
               <strong>Note:</strong> Email routing verification is only
-              available on deployed domains. When deployed, you'll see the
+              available on deployed domains. When deployed, you&apos;ll see the
               configured email addresses here.
             </p>
           </div>
