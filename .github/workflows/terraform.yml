@@ -262,24 +262,25 @@ jobs:
           name: terraform-plan
           path: ${{ github.workspace }}
 
-      - name: Verify Plan Artifact
+      - name: Verify and Move Plan Artifact
         run: |
           echo "Current working directory: $(pwd)"
           echo "Workspace: ${{ github.workspace }}"
           echo "Working directory: ${{ env.WORKING_DIRECTORY }}"
-          # Artifact should be at workspace/terraform/tfplan (preserves upload path structure)
-          PLAN_PATH="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/tfplan"
-          if [ -f "$PLAN_PATH" ]; then
-            echo "✅ Plan artifact found at $PLAN_PATH"
-            ls -lh "$PLAN_PATH"
+          # Artifact extracts to workspace root as tfplan (not preserving directory structure)
+          # Move it to the working directory where terraform expects it
+          if [ -f "${{ github.workspace }}/tfplan" ]; then
+            echo "✅ Plan artifact found at workspace root, moving to working directory"
+            mkdir -p "${{ env.WORKING_DIRECTORY }}"
+            mv "${{ github.workspace }}/tfplan" "${{ env.WORKING_DIRECTORY }}/tfplan"
+            ls -lh "${{ env.WORKING_DIRECTORY }}/tfplan"
+          elif [ -f "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/tfplan" ]; then
+            echo "✅ Plan artifact already in correct location"
+            ls -lh "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/tfplan"
           else
-            echo "::error::Plan artifact not found at $PLAN_PATH"
+            echo "::error::Plan artifact not found"
             echo "Searching for tfplan files in workspace:"
             find "${{ github.workspace }}" -name "tfplan" -o -name "*.tfplan" 2>/dev/null || true
-            echo "Files in workspace root:"
-            ls -la "${{ github.workspace }}" || true
-            echo "Files in ${{ env.WORKING_DIRECTORY }}:"
-            ls -la "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" 2>/dev/null || echo "Directory does not exist"
             exit 1
           fi
 
