@@ -35,8 +35,8 @@ jobs:
   plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
-    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-    # Plan runs automatically on push/PR - configure environment to NOT require approval
+    # No environment - plan runs automatically without approval
+    # Uses repository-level secrets (ensure secrets are configured at repository level)
     # Also runs on workflow_dispatch with terraform_command: plan
     # Skip on initial commit - setup workflows need to run first
     if: |
