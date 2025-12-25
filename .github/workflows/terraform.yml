@@ -306,22 +306,33 @@ jobs:
         run: |
           # Always encrypt state if it exists, even if apply failed
           # Terraform may have partially modified resources before failing
-          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" ]; then
+          # Use absolute paths since we're running from working-directory
+          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
+          STATE_ENCRYPTED="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
+          BACKUP_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup"
+          BACKUP_ENCRYPTED="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted"
+          
+          echo "Checking for state file at: $STATE_FILE"
+          if [ -f "$STATE_FILE" ]; then
             openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" \
-              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" \
+              -in "$STATE_FILE" \
+              -out "$STATE_ENCRYPTED" \
               -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "State file encrypted successfully"
+            echo "✅ State file encrypted successfully"
+            ls -lh "$STATE_ENCRYPTED"
           else
-            echo "⚠️  No state file found to encrypt (apply may have failed before creating state)"
+            echo "⚠️  No state file found at $STATE_FILE"
+            echo "Searching for state files in working directory:"
+            find "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" -name "*.tfstate*" 2>/dev/null || true
           fi
           # Encrypt backup file if it exists
-          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup" ]; then
+          if [ -f "$BACKUP_FILE" ]; then
             openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup" \
-              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted" \
+              -in "$BACKUP_FILE" \
+              -out "$BACKUP_ENCRYPTED" \
               -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "State backup file encrypted successfully"
+            echo "✅ State backup file encrypted successfully"
+            ls -lh "$BACKUP_ENCRYPTED"
           fi
 
       - name: Upload Encrypted Terraform State
@@ -423,22 +434,33 @@ jobs:
         run: |
           # Always encrypt state if it exists, even if destroy failed
           # Terraform may have partially destroyed resources before failing
-          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" ]; then
+          # Use absolute paths since we're running from working-directory
+          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
+          STATE_ENCRYPTED="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
+          BACKUP_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup"
+          BACKUP_ENCRYPTED="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted"
+          
+          echo "Checking for state file at: $STATE_FILE"
+          if [ -f "$STATE_FILE" ]; then
             openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" \
-              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" \
+              -in "$STATE_FILE" \
+              -out "$STATE_ENCRYPTED" \
               -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "State file encrypted successfully"
+            echo "✅ State file encrypted successfully"
+            ls -lh "$STATE_ENCRYPTED"
           else
-            echo "⚠️  No state file found to encrypt (destroy may have failed or completed)"
+            echo "⚠️  No state file found at $STATE_FILE"
+            echo "Searching for state files in working directory:"
+            find "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" -name "*.tfstate*" 2>/dev/null || true
           fi
           # Encrypt backup file if it exists
-          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup" ]; then
+          if [ -f "$BACKUP_FILE" ]; then
             openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup" \
-              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted" \
+              -in "$BACKUP_FILE" \
+              -out "$BACKUP_ENCRYPTED" \
               -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "State backup file encrypted successfully"
+            echo "✅ State backup file encrypted successfully"
+            ls -lh "$BACKUP_ENCRYPTED"
           fi
 
       - name: Upload Encrypted Terraform State
