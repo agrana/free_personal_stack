@@ -118,15 +118,17 @@ jobs:
               
               try {
                 // Check artifacts directly - this is the most reliable way
-                const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
+                const { data: artifactsResponse } = await github.rest.actions.listWorkflowRunArtifacts({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   run_id: run.id
                 });
                 
-                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.artifacts.length} artifact(s): ${artifacts.artifacts.map(a => a.name).join(', ')}`);
+                // The API returns { artifacts: [...] }, so access artifacts.artifacts
+                const artifacts = artifactsResponse.artifacts || [];
+                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.length} artifact(s): ${artifacts.map(a => a.name).join(', ')}`);
                 
-                const stateArtifact = artifacts.artifacts.find(a => a.name === 'terraform-state');
+                const stateArtifact = artifacts.find(a => a.name === 'terraform-state');
                 if (stateArtifact) {
                   console.log(`✅ Found state artifact in run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
                   core.setOutput('run_id', run.id.toString());
@@ -321,15 +323,17 @@ jobs:
               
               try {
                 // Check artifacts directly - this is the most reliable way
-                const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
+                const { data: artifactsResponse } = await github.rest.actions.listWorkflowRunArtifacts({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   run_id: run.id
                 });
                 
-                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.artifacts.length} artifact(s): ${artifacts.artifacts.map(a => a.name).join(', ')}`);
+                // The API returns { artifacts: [...] }, so access artifacts.artifacts
+                const artifacts = artifactsResponse.artifacts || [];
+                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.length} artifact(s): ${artifacts.map(a => a.name).join(', ')}`);
                 
-                const stateArtifact = artifacts.artifacts.find(a => a.name === 'terraform-state');
+                const stateArtifact = artifacts.find(a => a.name === 'terraform-state');
                 if (stateArtifact) {
                   console.log(`✅ Found state artifact in run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
                   core.setOutput('run_id', run.id.toString());
@@ -569,15 +573,17 @@ jobs:
               
               try {
                 // Check artifacts directly - this is the most reliable way
-                const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
+                const { data: artifactsResponse } = await github.rest.actions.listWorkflowRunArtifacts({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   run_id: run.id
                 });
                 
-                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.artifacts.length} artifact(s): ${artifacts.artifacts.map(a => a.name).join(', ')}`);
+                // The API returns { artifacts: [...] }, so access artifacts.artifacts
+                const artifacts = artifactsResponse.artifacts || [];
+                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.length} artifact(s): ${artifacts.map(a => a.name).join(', ')}`);
                 
-                const stateArtifact = artifacts.artifacts.find(a => a.name === 'terraform-state');
+                const stateArtifact = artifacts.find(a => a.name === 'terraform-state');
                 if (stateArtifact) {
                   console.log(`✅ Found state artifact in run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
                   core.setOutput('run_id', run.id.toString());
