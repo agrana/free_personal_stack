@@ -269,14 +269,18 @@ jobs:
           echo "Working directory: ${{ env.WORKING_DIRECTORY }}"
           # Artifact extracts to workspace root as tfplan (not preserving directory structure)
           # Move it to the working directory where terraform expects it
-          if [ -f "${{ github.workspace }}/tfplan" ]; then
+          PLAN_SOURCE="${{ github.workspace }}/tfplan"
+          PLAN_DEST="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/tfplan"
+          
+          if [ -f "$PLAN_SOURCE" ]; then
             echo "✅ Plan artifact found at workspace root, moving to working directory"
-            mkdir -p "${{ env.WORKING_DIRECTORY }}"
-            mv "${{ github.workspace }}/tfplan" "${{ env.WORKING_DIRECTORY }}/tfplan"
-            ls -lh "${{ env.WORKING_DIRECTORY }}/tfplan"
-          elif [ -f "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/tfplan" ]; then
+            mkdir -p "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}"
+            mv "$PLAN_SOURCE" "$PLAN_DEST"
+            echo "✅ Moved plan artifact to $PLAN_DEST"
+            ls -lh "$PLAN_DEST"
+          elif [ -f "$PLAN_DEST" ]; then
             echo "✅ Plan artifact already in correct location"
-            ls -lh "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/tfplan"
+            ls -lh "$PLAN_DEST"
           else
             echo "::error::Plan artifact not found"
             echo "Searching for tfplan files in workspace:"
