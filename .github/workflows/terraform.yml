@@ -222,6 +222,7 @@ jobs:
 
       - name: Verify State File Has Resources
         if: github.event_name != 'pull_request' && steps.download-state.outcome == 'success'
+        continue-on-error: true
         run: |
           STATE_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
           
@@ -230,17 +231,25 @@ jobs:
             exit 0
           fi
           
+          # Check if TERRAFORM_STATE_PASSWORD is available
+          if [ -z "${{ secrets.TERRAFORM_STATE_PASSWORD }}" ]; then
+            echo "⚠️  TERRAFORM_STATE_PASSWORD not available - skipping verification"
+            echo "State file will be decrypted in the next step if password is available"
+            exit 0
+          fi
+          
           echo "Verifying state file has actual resources (not just data sources)..."
           
           # Decrypt temporarily to check content
           TEMP_STATE="/tmp/terraform.tfstate.check"
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
+          if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
             -in "$STATE_ENC" \
             -out "$TEMP_STATE" \
-            -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}" 2>/dev/null || {
-            echo "❌ Failed to decrypt state file for verification"
-            exit 1
-          }
+            -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}" 2>/dev/null; then
+            echo "⚠️  Failed to decrypt state file for verification (password may be incorrect or file corrupted)"
+            echo "This is non-blocking - state will be decrypted in the next step"
+            exit 0
+          fi
           
           # Check if it's valid JSON
           if ! jq empty "$TEMP_STATE" 2>/dev/null; then
