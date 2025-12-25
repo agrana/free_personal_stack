@@ -407,6 +407,17 @@ jobs:
         if: steps.plan.outcome == 'failure'
         run: exit 1
 
+      - name: Upload State File Used for Plan
+        if: steps.plan.outcome == 'success' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-state-for-plan
+          path: |
+            ${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate
+            ${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup
+          retention-days: 1
+          if-no-files-found: ignore
+
       - name: Upload Plan Artifact
         if: steps.plan.outcome == 'success'
         uses: actions/upload-artifact@v4
@@ -496,7 +507,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Find State Artifact Run
+      - name: Download State File Used for Plan
+        if: github.event_name != 'pull_request'
+        uses: actions/download-artifact@v4
+        id: download-plan-state
+        continue-on-error: true
+        with:
+          name: terraform-state-for-plan
+          path: ${{ env.WORKING_DIRECTORY }}/
+
+      - name: Find State Artifact Run (if not from plan)
+        if: github.event_name != 'pull_request' && steps.download-plan-state.outcome != 'success'
         id: find-state-run
         uses: actions/github-script@v7
         continue-on-error: true
