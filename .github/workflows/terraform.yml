@@ -534,7 +534,7 @@ jobs:
     if: |
       github.event_name != 'pull_request' &&
       needs.plan.result == 'success' &&
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_command == 'apply')
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (github.event.inputs.terraform_command == 'apply' || github.event.inputs.terraform_command == '')))
     
     defaults:
       run:
