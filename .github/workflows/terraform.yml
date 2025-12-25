@@ -140,7 +140,9 @@ jobs:
                 });
                 
                 const applyJob = jobs.jobs.find(job => job.name === 'Terraform Apply');
+                const destroyJob = jobs.jobs.find(job => job.name === 'Terraform Destroy');
                 const applySucceeded = applyJob && applyJob.conclusion === 'success';
+                const destroySucceeded = destroyJob && destroyJob.conclusion === 'success';
                 
                 // Check artifacts
                 const { data: artifactsResponse } = await github.rest.actions.listWorkflowRunArtifacts({
@@ -155,6 +157,7 @@ jobs:
                 
                 console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
                 console.log(`   Apply job: ${applyJob ? `${applyJob.name} (${applyJob.conclusion || 'unknown'})` : 'not found'}`);
+                console.log(`   Destroy job: ${destroyJob ? `${destroyJob.name} (${destroyJob.conclusion || 'unknown'})` : 'not found'}`);
                 console.log(`   Artifacts: ${artifactNames.join(', ') || 'none'}`);
                 
                 if (stateArtifact) {
@@ -163,6 +166,7 @@ jobs:
                     artifact_id: stateArtifact.id,
                     artifact_size: stateArtifact.size_in_bytes,
                     apply_succeeded: applySucceeded,
+                    destroy_succeeded: destroySucceeded,
                     run_status: run.status,
                     run_conclusion: run.conclusion
                   };
@@ -175,16 +179,25 @@ jobs:
                     core.setOutput('run_id', runInfo.run_id.toString());
                     core.setOutput('artifact_id', runInfo.artifact_id.toString());
                     return; // Stop searching - we found the best one
+                  } else if (destroySucceeded) {
+                    // Found successful destroy with state artifact - use it (state will be empty/updated)
+                    console.log(`   ✅ State artifact found + Destroy succeeded`);
+                    console.log(`\n✅ Found successful destroy with state artifact`);
+                    console.log(`   Using run ${runInfo.run_id} (Destroy succeeded, State size: ${runInfo.artifact_size} bytes)`);
+                    console.log(`   Note: State may be empty if all resources were destroyed`);
+                    core.setOutput('run_id', runInfo.run_id.toString());
+                    core.setOutput('artifact_id', runInfo.artifact_id.toString());
+                    return; // Stop searching - destroy state is also valid
                   } else {
-                    // Keep as fallback but continue searching for successful apply
+                    // Keep as fallback but continue searching for successful apply or destroy
                     if (!fallbackRun) {
                       fallbackRun = runInfo;
-                      console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'} (keeping as fallback)`);
+                      console.log(`   ⚠️  State artifact found but Apply/Destroy ${applyJob || destroyJob ? `failed` : 'not found'} (keeping as fallback)`);
                     } else {
-                      console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'} (skipping, already have fallback)`);
+                      console.log(`   ⚠️  State artifact found but Apply/Destroy ${applyJob || destroyJob ? `failed` : 'not found'} (skipping, already have fallback)`);
                     }
                   }
-                } else if (applySucceeded) {
+                } else if (applySucceeded || destroySucceeded) {
                   // Apply succeeded but no state artifact - likely upload failed
                   console.log(`   ⚠️  Apply succeeded but NO state artifact found`);
                   console.log(`   This means resources were created but state wasn't uploaded`);
@@ -609,7 +622,9 @@ jobs:
                 });
                 
                 const applyJob = jobs.jobs.find(job => job.name === 'Terraform Apply');
+                const destroyJob = jobs.jobs.find(job => job.name === 'Terraform Destroy');
                 const applySucceeded = applyJob && applyJob.conclusion === 'success';
+                const destroySucceeded = destroyJob && destroyJob.conclusion === 'success';
                 
                 // Check artifacts
                 const { data: artifactsResponse } = await github.rest.actions.listWorkflowRunArtifacts({
@@ -624,6 +639,7 @@ jobs:
                 
                 console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
                 console.log(`   Apply job: ${applyJob ? `${applyJob.name} (${applyJob.conclusion || 'unknown'})` : 'not found'}`);
+                console.log(`   Destroy job: ${destroyJob ? `${destroyJob.name} (${destroyJob.conclusion || 'unknown'})` : 'not found'}`);
                 console.log(`   Artifacts: ${artifactNames.join(', ') || 'none'}`);
                 
                 if (stateArtifact) {
@@ -632,6 +648,7 @@ jobs:
                     artifact_id: stateArtifact.id,
                     artifact_size: stateArtifact.size_in_bytes,
                     apply_succeeded: applySucceeded,
+                    destroy_succeeded: destroySucceeded,
                     run_status: run.status,
                     run_conclusion: run.conclusion
                   };
@@ -644,16 +661,25 @@ jobs:
                     core.setOutput('run_id', runInfo.run_id.toString());
                     core.setOutput('artifact_id', runInfo.artifact_id.toString());
                     return; // Stop searching - we found the best one
+                  } else if (destroySucceeded) {
+                    // Found successful destroy with state artifact - use it (state will be empty/updated)
+                    console.log(`   ✅ State artifact found + Destroy succeeded`);
+                    console.log(`\n✅ Found successful destroy with state artifact`);
+                    console.log(`   Using run ${runInfo.run_id} (Destroy succeeded, State size: ${runInfo.artifact_size} bytes)`);
+                    console.log(`   Note: State may be empty if all resources were destroyed`);
+                    core.setOutput('run_id', runInfo.run_id.toString());
+                    core.setOutput('artifact_id', runInfo.artifact_id.toString());
+                    return; // Stop searching - destroy state is also valid
                   } else {
-                    // Keep as fallback but continue searching for successful apply
+                    // Keep as fallback but continue searching for successful apply or destroy
                     if (!fallbackRun) {
                       fallbackRun = runInfo;
-                      console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'} (keeping as fallback)`);
+                      console.log(`   ⚠️  State artifact found but Apply/Destroy ${applyJob || destroyJob ? `failed` : 'not found'} (keeping as fallback)`);
                     } else {
-                      console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'} (skipping, already have fallback)`);
+                      console.log(`   ⚠️  State artifact found but Apply/Destroy ${applyJob || destroyJob ? `failed` : 'not found'} (skipping, already have fallback)`);
                     }
                   }
-                } else if (applySucceeded) {
+                } else if (applySucceeded || destroySucceeded) {
                   // Apply succeeded but no state artifact - likely upload failed
                   console.log(`   ⚠️  Apply succeeded but NO state artifact found`);
                   console.log(`   This means resources were created but state wasn't uploaded`);
@@ -932,7 +958,9 @@ jobs:
                 });
                 
                 const applyJob = jobs.jobs.find(job => job.name === 'Terraform Apply');
+                const destroyJob = jobs.jobs.find(job => job.name === 'Terraform Destroy');
                 const applySucceeded = applyJob && applyJob.conclusion === 'success';
+                const destroySucceeded = destroyJob && destroyJob.conclusion === 'success';
                 
                 // Check artifacts
                 const { data: artifactsResponse } = await github.rest.actions.listWorkflowRunArtifacts({
@@ -947,6 +975,7 @@ jobs:
                 
                 console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
                 console.log(`   Apply job: ${applyJob ? `${applyJob.name} (${applyJob.conclusion || 'unknown'})` : 'not found'}`);
+                console.log(`   Destroy job: ${destroyJob ? `${destroyJob.name} (${destroyJob.conclusion || 'unknown'})` : 'not found'}`);
                 console.log(`   Artifacts: ${artifactNames.join(', ') || 'none'}`);
                 
                 if (stateArtifact) {
@@ -955,6 +984,7 @@ jobs:
                     artifact_id: stateArtifact.id,
                     artifact_size: stateArtifact.size_in_bytes,
                     apply_succeeded: applySucceeded,
+                    destroy_succeeded: destroySucceeded,
                     run_status: run.status,
                     run_conclusion: run.conclusion
                   };
@@ -967,16 +997,25 @@ jobs:
                     core.setOutput('run_id', runInfo.run_id.toString());
                     core.setOutput('artifact_id', runInfo.artifact_id.toString());
                     return; // Stop searching - we found the best one
+                  } else if (destroySucceeded) {
+                    // Found successful destroy with state artifact - use it (state will be empty/updated)
+                    console.log(`   ✅ State artifact found + Destroy succeeded`);
+                    console.log(`\n✅ Found successful destroy with state artifact`);
+                    console.log(`   Using run ${runInfo.run_id} (Destroy succeeded, State size: ${runInfo.artifact_size} bytes)`);
+                    console.log(`   Note: State may be empty if all resources were destroyed`);
+                    core.setOutput('run_id', runInfo.run_id.toString());
+                    core.setOutput('artifact_id', runInfo.artifact_id.toString());
+                    return; // Stop searching - destroy state is also valid
                   } else {
-                    // Keep as fallback but continue searching for successful apply
+                    // Keep as fallback but continue searching for successful apply or destroy
                     if (!fallbackRun) {
                       fallbackRun = runInfo;
-                      console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'} (keeping as fallback)`);
+                      console.log(`   ⚠️  State artifact found but Apply/Destroy ${applyJob || destroyJob ? `failed` : 'not found'} (keeping as fallback)`);
                     } else {
-                      console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'} (skipping, already have fallback)`);
+                      console.log(`   ⚠️  State artifact found but Apply/Destroy ${applyJob || destroyJob ? `failed` : 'not found'} (skipping, already have fallback)`);
                     }
                   }
-                } else if (applySucceeded) {
+                } else if (applySucceeded || destroySucceeded) {
                   // Apply succeeded but no state artifact - likely upload failed
                   console.log(`   ⚠️  Apply succeeded but NO state artifact found`);
                   console.log(`   This means resources were created but state wasn't uploaded`);
