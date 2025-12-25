@@ -109,8 +109,9 @@ jobs:
             // Search for the most recent run that has the terraform-state artifact
             // Runs are already sorted by most recent first
             for (const run of runs.workflow_runs) {
-              // Skip runs that are still in progress or queued
-              if (run.status === 'in_progress' || run.status === 'queued') {
+              // Only skip queued runs - artifacts are available even for in_progress runs
+              // (artifacts are uploaded as soon as the job completes, not when the workflow completes)
+              if (run.status === 'queued') {
                 console.log(`Skipping run ${run.id} - status: ${run.status}`);
                 continue;
               }
@@ -311,8 +312,9 @@ jobs:
             // Search for the most recent run that has the terraform-state artifact
             // Runs are already sorted by most recent first
             for (const run of runs.workflow_runs) {
-              // Skip runs that are still in progress or queued
-              if (run.status === 'in_progress' || run.status === 'queued') {
+              // Only skip queued runs - artifacts are available even for in_progress runs
+              // (artifacts are uploaded as soon as the job completes, not when the workflow completes)
+              if (run.status === 'queued') {
                 console.log(`Skipping run ${run.id} - status: ${run.status}`);
                 continue;
               }
@@ -558,8 +560,9 @@ jobs:
             // Search for the most recent run that has the terraform-state artifact
             // Runs are already sorted by most recent first
             for (const run of runs.workflow_runs) {
-              // Skip runs that are still in progress or queued
-              if (run.status === 'in_progress' || run.status === 'queued') {
+              // Only skip queued runs - artifacts are available even for in_progress runs
+              // (artifacts are uploaded as soon as the job completes, not when the workflow completes)
+              if (run.status === 'queued') {
                 console.log(`Skipping run ${run.id} - status: ${run.status}`);
                 continue;
               }
