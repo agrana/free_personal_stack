@@ -629,8 +629,8 @@ jobs:
             core.setOutput('run_id', '');
             core.setOutput('artifact_id', '');
 
-      - name: Download Terraform State (if exists)
-        if: steps.find-state-run.outcome == 'success' && steps.find-state-run.outputs.run_id != ''
+      - name: Download Terraform State (if exists and not from plan)
+        if: github.event_name != 'pull_request' && steps.download-plan-state.outcome != 'success' && steps.find-state-run.outcome == 'success' && steps.find-state-run.outputs.run_id != ''
         uses: dawidd6/action-download-artifact@v3
         id: download-state
         continue-on-error: true
@@ -641,21 +641,41 @@ jobs:
           run_id: ${{ steps.find-state-run.outputs.run_id }}
 
       - name: Decrypt Terraform State (if exists)
-        if: steps.download-state.outcome == 'success'
+        if: github.event_name != 'pull_request' && (steps.download-plan-state.outcome == 'success' || steps.download-state.outcome == 'success')
         run: |
-          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" ]; then
-            openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" \
-              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "State file decrypted successfully"
+          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
+          BACKUP_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup"
+          STATE_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
+          BACKUP_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted"
+          
+          # If we got state from plan job, it's already decrypted
+          if [ -f "$STATE_FILE" ] && [ ! -f "$STATE_ENC" ]; then
+            echo "✅ Using state file from plan job (already decrypted)"
+            ls -lh "$STATE_FILE"
+            if [ -f "$BACKUP_FILE" ]; then
+              echo "✅ Using backup file from plan job"
+              ls -lh "$BACKUP_FILE"
+            fi
+            exit 0
           fi
-          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted" ]; then
+          
+          # Otherwise, decrypt the encrypted state
+          echo "Decrypting state file from artifact..."
+          if [ -f "$STATE_ENC" ]; then
             openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted" \
-              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup" \
+              -in "$STATE_ENC" \
+              -out "$STATE_FILE" \
               -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "State backup file decrypted successfully"
+            echo "✅ State file decrypted successfully"
+            ls -lh "$STATE_FILE"
+          fi
+          if [ -f "$BACKUP_ENC" ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
+              -in "$BACKUP_ENC" \
+              -out "$BACKUP_FILE" \
+              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
+            echo "✅ State backup file decrypted successfully"
+            ls -lh "$BACKUP_FILE"
           fi
         continue-on-error: true
 
