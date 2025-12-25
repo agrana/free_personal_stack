@@ -229,6 +229,70 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
+      - name: Verify State File After Init
+        if: github.event_name != 'pull_request'
+        run: |
+          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
+          echo "## 🔍 Verifying State File After Terraform Init" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "$STATE_FILE" ]; then
+            echo "✅ State file exists at: $STATE_FILE" >> $GITHUB_STEP_SUMMARY
+            echo "State file size: $(wc -c < "$STATE_FILE") bytes" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Check if it's valid JSON
+            if jq empty "$STATE_FILE" 2>/dev/null; then
+              echo "✅ State file is valid JSON" >> $GITHUB_STEP_SUMMARY
+              
+              # Get state file version
+              STATE_VERSION=$(jq -r '.version // "unknown"' "$STATE_FILE" 2>/dev/null)
+              echo "State file version: $STATE_VERSION" >> $GITHUB_STEP_SUMMARY
+              
+              # Count resources
+              RESOURCE_COUNT=$(jq -r '[.resources[]?] | length' "$STATE_FILE" 2>/dev/null || echo "0")
+              echo "Resources in state: $RESOURCE_COUNT" >> $GITHUB_STEP_SUMMARY
+              
+              # List resource types
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### Resource Types in State:" >> $GITHUB_STEP_SUMMARY
+              jq -r '.resources[]? | .type + "." + .name' "$STATE_FILE" 2>/dev/null | sort | while read resource; do
+                echo "- \`$resource\`" >> $GITHUB_STEP_SUMMARY
+              done || echo "No resources found" >> $GITHUB_STEP_SUMMARY
+              
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### State File Preview:" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+              jq '{version, terraform_version, resources: [.resources[]? | {type, name, mode}]}' "$STATE_FILE" 2>/dev/null | head -30 >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ State file is NOT valid JSON!" >> $GITHUB_STEP_SUMMARY
+              echo "First 20 lines:" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              head -20 "$STATE_FILE" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Terraform State List:" >> $GITHUB_STEP_SUMMARY
+            cd "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}"
+            if terraform state list 2>&1 | tee -a $GITHUB_STEP_SUMMARY; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              STATE_LIST_COUNT=$(terraform state list 2>/dev/null | wc -l)
+              echo "✅ Terraform can see $STATE_LIST_COUNT resource(s) in state" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "⚠️  Terraform state list failed or returned empty" >> $GITHUB_STEP_SUMMARY
+              echo "This might mean Terraform isn't using the state file" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "❌ No state file found at $STATE_FILE" >> $GITHUB_STEP_SUMMARY
+            echo "Terraform will start with empty state (this is normal for first run)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Files in ${{ env.WORKING_DIRECTORY }}:" >> $GITHUB_STEP_SUMMARY
+            ls -la "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" >> $GITHUB_STEP_SUMMARY || echo "Directory not found" >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Terraform Validate
         run: terraform validate -no-color
 
