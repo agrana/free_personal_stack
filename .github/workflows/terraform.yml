@@ -794,7 +794,7 @@ jobs:
           path: |
             ${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted
             ${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted
-          retention-days: 400
+          retention-days: 90
           if-no-files-found: ignore
           overwrite: true
 
@@ -1061,6 +1061,6 @@ jobs:
           path: |
             ${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted
             ${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted
-          retention-days: 400
+          retention-days: 90
           if-no-files-found: ignore
           overwrite: true
