@@ -107,9 +107,9 @@ jobs:
             
             console.log(`Found ${runs.workflow_runs.length} workflow runs`);
             
-            // First pass: Look for runs where apply succeeded
-            const runsWithSuccessfulApply = [];
-            const runsWithStateArtifact = [];
+            // Search for the most recent run with successful apply and state artifact
+            // Stop as soon as we find one since runs are sorted by most recent first
+            let fallbackRun = null;
             
             for (const run of runs.workflow_runs) {
               // Only skip queued runs - artifacts are available even for in_progress runs
@@ -155,11 +155,21 @@ jobs:
                   };
                   
                   if (applySucceeded) {
-                    runsWithSuccessfulApply.push(runInfo);
+                    // Found successful apply with state artifact - use it immediately
                     console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
+                    console.log(`\n✅ Found successful apply with state artifact`);
+                    console.log(`   Using run ${runInfo.run_id} (Apply succeeded, State size: ${runInfo.artifact_size} bytes)`);
+                    core.setOutput('run_id', runInfo.run_id.toString());
+                    core.setOutput('artifact_id', runInfo.artifact_id.toString());
+                    return; // Stop searching - we found the best one
                   } else {
-                    runsWithStateArtifact.push(runInfo);
-                    console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'}`);
+                    // Keep as fallback but continue searching for successful apply
+                    if (!fallbackRun) {
+                      fallbackRun = runInfo;
+                      console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'} (keeping as fallback)`);
+                    } else {
+                      console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'} (skipping, already have fallback)`);
+                    }
                   }
                 } else if (applySucceeded) {
                   // Apply succeeded but no state artifact - likely upload failed
@@ -173,24 +183,13 @@ jobs:
               }
             }
             
-            // Prefer runs where apply succeeded
-            if (runsWithSuccessfulApply.length > 0) {
-              const bestRun = runsWithSuccessfulApply[0]; // Already sorted by most recent
-              console.log(`\n✅ Found ${runsWithSuccessfulApply.length} run(s) with successful apply and state artifact`);
-              console.log(`   Using run ${bestRun.run_id} (Apply succeeded, State size: ${bestRun.artifact_size} bytes)`);
-              core.setOutput('run_id', bestRun.run_id.toString());
-              core.setOutput('artifact_id', bestRun.artifact_id.toString());
-              return;
-            }
-            
             // Fallback to any run with state artifact if no successful apply found
-            if (runsWithStateArtifact.length > 0) {
-              const bestRun = runsWithStateArtifact[0];
-              console.log(`\n⚠️  No runs with successful apply found, using run with state artifact`);
-              console.log(`   Using run ${bestRun.run_id} (Apply ${bestRun.apply_succeeded ? 'succeeded' : 'failed'}, State size: ${bestRun.artifact_size} bytes)`);
+            if (fallbackRun) {
+              console.log(`\n⚠️  No runs with successful apply found, using fallback run with state artifact`);
+              console.log(`   Using run ${fallbackRun.run_id} (Apply ${fallbackRun.apply_succeeded ? 'succeeded' : 'failed'}, State size: ${fallbackRun.artifact_size} bytes)`);
               console.log(`   ⚠️  Warning: This state may be incomplete or from a failed apply`);
-              core.setOutput('run_id', bestRun.run_id.toString());
-              core.setOutput('artifact_id', bestRun.artifact_id.toString());
+              core.setOutput('run_id', fallbackRun.run_id.toString());
+              core.setOutput('artifact_id', fallbackRun.artifact_id.toString());
               return;
             }
             
@@ -538,9 +537,9 @@ jobs:
             
             console.log(`Found ${runs.workflow_runs.length} workflow runs`);
             
-            // First pass: Look for runs where apply succeeded
-            const runsWithSuccessfulApply = [];
-            const runsWithStateArtifact = [];
+            // Search for the most recent run with successful apply and state artifact
+            // Stop as soon as we find one since runs are sorted by most recent first
+            let fallbackRun = null;
             
             for (const run of runs.workflow_runs) {
               // Only skip queued runs - artifacts are available even for in_progress runs
@@ -586,11 +585,21 @@ jobs:
                   };
                   
                   if (applySucceeded) {
-                    runsWithSuccessfulApply.push(runInfo);
+                    // Found successful apply with state artifact - use it immediately
                     console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
+                    console.log(`\n✅ Found successful apply with state artifact`);
+                    console.log(`   Using run ${runInfo.run_id} (Apply succeeded, State size: ${runInfo.artifact_size} bytes)`);
+                    core.setOutput('run_id', runInfo.run_id.toString());
+                    core.setOutput('artifact_id', runInfo.artifact_id.toString());
+                    return; // Stop searching - we found the best one
                   } else {
-                    runsWithStateArtifact.push(runInfo);
-                    console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'}`);
+                    // Keep as fallback but continue searching for successful apply
+                    if (!fallbackRun) {
+                      fallbackRun = runInfo;
+                      console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'} (keeping as fallback)`);
+                    } else {
+                      console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'} (skipping, already have fallback)`);
+                    }
                   }
                 } else if (applySucceeded) {
                   // Apply succeeded but no state artifact - likely upload failed
@@ -604,24 +613,13 @@ jobs:
               }
             }
             
-            // Prefer runs where apply succeeded
-            if (runsWithSuccessfulApply.length > 0) {
-              const bestRun = runsWithSuccessfulApply[0]; // Already sorted by most recent
-              console.log(`\n✅ Found ${runsWithSuccessfulApply.length} run(s) with successful apply and state artifact`);
-              console.log(`   Using run ${bestRun.run_id} (Apply succeeded, State size: ${bestRun.artifact_size} bytes)`);
-              core.setOutput('run_id', bestRun.run_id.toString());
-              core.setOutput('artifact_id', bestRun.artifact_id.toString());
-              return;
-            }
-            
             // Fallback to any run with state artifact if no successful apply found
-            if (runsWithStateArtifact.length > 0) {
-              const bestRun = runsWithStateArtifact[0];
-              console.log(`\n⚠️  No runs with successful apply found, using run with state artifact`);
-              console.log(`   Using run ${bestRun.run_id} (Apply ${bestRun.apply_succeeded ? 'succeeded' : 'failed'}, State size: ${bestRun.artifact_size} bytes)`);
+            if (fallbackRun) {
+              console.log(`\n⚠️  No runs with successful apply found, using fallback run with state artifact`);
+              console.log(`   Using run ${fallbackRun.run_id} (Apply ${fallbackRun.apply_succeeded ? 'succeeded' : 'failed'}, State size: ${fallbackRun.artifact_size} bytes)`);
               console.log(`   ⚠️  Warning: This state may be incomplete or from a failed apply`);
-              core.setOutput('run_id', bestRun.run_id.toString());
-              core.setOutput('artifact_id', bestRun.artifact_id.toString());
+              core.setOutput('run_id', fallbackRun.run_id.toString());
+              core.setOutput('artifact_id', fallbackRun.artifact_id.toString());
               return;
             }
             
@@ -860,9 +858,9 @@ jobs:
             
             console.log(`Found ${runs.workflow_runs.length} workflow runs`);
             
-            // First pass: Look for runs where apply succeeded
-            const runsWithSuccessfulApply = [];
-            const runsWithStateArtifact = [];
+            // Search for the most recent run with successful apply and state artifact
+            // Stop as soon as we find one since runs are sorted by most recent first
+            let fallbackRun = null;
             
             for (const run of runs.workflow_runs) {
               // Only skip queued runs - artifacts are available even for in_progress runs
@@ -908,11 +906,21 @@ jobs:
                   };
                   
                   if (applySucceeded) {
-                    runsWithSuccessfulApply.push(runInfo);
+                    // Found successful apply with state artifact - use it immediately
                     console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
+                    console.log(`\n✅ Found successful apply with state artifact`);
+                    console.log(`   Using run ${runInfo.run_id} (Apply succeeded, State size: ${runInfo.artifact_size} bytes)`);
+                    core.setOutput('run_id', runInfo.run_id.toString());
+                    core.setOutput('artifact_id', runInfo.artifact_id.toString());
+                    return; // Stop searching - we found the best one
                   } else {
-                    runsWithStateArtifact.push(runInfo);
-                    console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'}`);
+                    // Keep as fallback but continue searching for successful apply
+                    if (!fallbackRun) {
+                      fallbackRun = runInfo;
+                      console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'} (keeping as fallback)`);
+                    } else {
+                      console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'} (skipping, already have fallback)`);
+                    }
                   }
                 } else if (applySucceeded) {
                   // Apply succeeded but no state artifact - likely upload failed
@@ -926,24 +934,13 @@ jobs:
               }
             }
             
-            // Prefer runs where apply succeeded
-            if (runsWithSuccessfulApply.length > 0) {
-              const bestRun = runsWithSuccessfulApply[0]; // Already sorted by most recent
-              console.log(`\n✅ Found ${runsWithSuccessfulApply.length} run(s) with successful apply and state artifact`);
-              console.log(`   Using run ${bestRun.run_id} (Apply succeeded, State size: ${bestRun.artifact_size} bytes)`);
-              core.setOutput('run_id', bestRun.run_id.toString());
-              core.setOutput('artifact_id', bestRun.artifact_id.toString());
-              return;
-            }
-            
             // Fallback to any run with state artifact if no successful apply found
-            if (runsWithStateArtifact.length > 0) {
-              const bestRun = runsWithStateArtifact[0];
-              console.log(`\n⚠️  No runs with successful apply found, using run with state artifact`);
-              console.log(`   Using run ${bestRun.run_id} (Apply ${bestRun.apply_succeeded ? 'succeeded' : 'failed'}, State size: ${bestRun.artifact_size} bytes)`);
+            if (fallbackRun) {
+              console.log(`\n⚠️  No runs with successful apply found, using fallback run with state artifact`);
+              console.log(`   Using run ${fallbackRun.run_id} (Apply ${fallbackRun.apply_succeeded ? 'succeeded' : 'failed'}, State size: ${fallbackRun.artifact_size} bytes)`);
               console.log(`   ⚠️  Warning: This state may be incomplete or from a failed apply`);
-              core.setOutput('run_id', bestRun.run_id.toString());
-              core.setOutput('artifact_id', bestRun.artifact_id.toString());
+              core.setOutput('run_id', fallbackRun.run_id.toString());
+              core.setOutput('artifact_id', fallbackRun.artifact_id.toString());
               return;
             }
             
