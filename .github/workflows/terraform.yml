@@ -263,6 +263,21 @@ jobs:
           path: ${{ env.WORKING_DIRECTORY }}/
           github_token: ${{ secrets.GITHUB_TOKEN }}
           run_id: ${{ steps.find-state-run.outputs.run_id }}
+      
+      - name: Log State Download Info
+        if: github.event_name != 'pull_request' && steps.find-state-run.outcome == 'success'
+        run: |
+          echo "📥 State download information:"
+          echo "   Run ID: ${{ steps.find-state-run.outputs.run_id }}"
+          echo "   Artifact ID: ${{ steps.find-state-run.outputs.artifact_id }}"
+          echo "   Download outcome: ${{ steps.download-state.outcome }}"
+          if [ "${{ steps.download-state.outcome }}" == "success" ]; then
+            echo "   ✅ State artifact downloaded successfully"
+            echo "   Checking downloaded files:"
+            ls -lah "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" || echo "Directory not found"
+          else
+            echo "   ⚠️  State artifact download failed or skipped"
+          fi
 
       - name: Verify State File Has Resources
         if: github.event_name != 'pull_request' && steps.download-state.outcome == 'success'
