@@ -161,6 +161,11 @@ jobs:
                     runsWithStateArtifact.push(runInfo);
                     console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'}`);
                   }
+                } else if (applySucceeded) {
+                  // Apply succeeded but no state artifact - likely upload failed
+                  console.log(`   ⚠️  Apply succeeded but NO state artifact found`);
+                  console.log(`   This means resources were created but state wasn't uploaded`);
+                  console.log(`   You'll need to run apply again to create a proper state artifact`);
                 }
               } catch (error) {
                 console.log(`   Error checking run ${run.id}: ${error.message}`);
@@ -566,6 +571,11 @@ jobs:
                     runsWithStateArtifact.push(runInfo);
                     console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'}`);
                   }
+                } else if (applySucceeded) {
+                  // Apply succeeded but no state artifact - likely upload failed
+                  console.log(`   ⚠️  Apply succeeded but NO state artifact found`);
+                  console.log(`   This means resources were created but state wasn't uploaded`);
+                  console.log(`   You'll need to run apply again to create a proper state artifact`);
                 }
               } catch (error) {
                 console.log(`   Error checking run ${run.id}: ${error.message}`);
@@ -863,6 +873,11 @@ jobs:
                     runsWithStateArtifact.push(runInfo);
                     console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'}`);
                   }
+                } else if (applySucceeded) {
+                  // Apply succeeded but no state artifact - likely upload failed
+                  console.log(`   ⚠️  Apply succeeded but NO state artifact found`);
+                  console.log(`   This means resources were created but state wasn't uploaded`);
+                  console.log(`   You'll need to run apply again to create a proper state artifact`);
                 }
               } catch (error) {
                 console.log(`   Error checking run ${run.id}: ${error.message}`);
