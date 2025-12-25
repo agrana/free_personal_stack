@@ -18,6 +18,10 @@ env:
   TF_VERSION: '1.9.0'
   WORKING_DIRECTORY: './terraform'
 
+permissions:
+  contents: read
+  actions: read  # Required to read artifacts from other workflow runs
+
 jobs:
   plan:
     name: Terraform Plan
@@ -91,6 +95,8 @@ jobs:
           script: |
             // Find the most recent workflow run (any status) that has the terraform-state artifact
             // State is uploaded with if: always(), so failed runs can also have updated state
+            console.log(`Searching for terraform-state artifact in workflow: terraform.yml`);
+            
             const { data: runs } = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -98,11 +104,14 @@ jobs:
               per_page: 50
             });
             
+            console.log(`Found ${runs.workflow_runs.length} workflow runs`);
+            
             // Search for the most recent run that has the terraform-state artifact
             // Runs are already sorted by most recent first
             for (const run of runs.workflow_runs) {
               // Only check completed runs (success, failure, cancelled, etc.)
               if (run.status !== 'completed') {
+                console.log(`Skipping run ${run.id} - status: ${run.status}`);
                 continue;
               }
               
@@ -113,20 +122,23 @@ jobs:
                   run_id: run.id
                 });
                 
+                console.log(`Run ${run.id} (${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.artifacts.length} artifact(s): ${artifacts.artifacts.map(a => a.name).join(', ')}`);
+                
                 const stateArtifact = artifacts.artifacts.find(a => a.name === 'terraform-state');
                 if (stateArtifact) {
-                  console.log(`Found state artifact in run ${run.id} (${run.conclusion || 'unknown'}, ${run.head_branch})`);
+                  console.log(`✅ Found state artifact in run ${run.id} (${run.conclusion || 'unknown'}, ${run.head_branch})`);
                   core.setOutput('run_id', run.id.toString());
                   core.setOutput('artifact_id', stateArtifact.id.toString());
                   return;
                 }
               } catch (error) {
+                console.log(`Error checking artifacts for run ${run.id}: ${error.message}`);
                 // Continue searching if this run doesn't have artifacts or API call fails
                 continue;
               }
             }
             
-            console.log('No state artifact found in recent workflow runs');
+            console.log('❌ No state artifact found in recent workflow runs');
             core.setOutput('run_id', '');
             core.setOutput('artifact_id', '');
 
@@ -284,6 +296,8 @@ jobs:
           script: |
             // Find the most recent workflow run (any status) that has the terraform-state artifact
             // State is uploaded with if: always(), so failed runs can also have updated state
+            console.log(`Searching for terraform-state artifact in workflow: terraform.yml`);
+            
             const { data: runs } = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -291,11 +305,14 @@ jobs:
               per_page: 50
             });
             
+            console.log(`Found ${runs.workflow_runs.length} workflow runs`);
+            
             // Search for the most recent run that has the terraform-state artifact
             // Runs are already sorted by most recent first
             for (const run of runs.workflow_runs) {
               // Only check completed runs (success, failure, cancelled, etc.)
               if (run.status !== 'completed') {
+                console.log(`Skipping run ${run.id} - status: ${run.status}`);
                 continue;
               }
               
@@ -306,20 +323,23 @@ jobs:
                   run_id: run.id
                 });
                 
+                console.log(`Run ${run.id} (${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.artifacts.length} artifact(s): ${artifacts.artifacts.map(a => a.name).join(', ')}`);
+                
                 const stateArtifact = artifacts.artifacts.find(a => a.name === 'terraform-state');
                 if (stateArtifact) {
-                  console.log(`Found state artifact in run ${run.id} (${run.conclusion || 'unknown'}, ${run.head_branch})`);
+                  console.log(`✅ Found state artifact in run ${run.id} (${run.conclusion || 'unknown'}, ${run.head_branch})`);
                   core.setOutput('run_id', run.id.toString());
                   core.setOutput('artifact_id', stateArtifact.id.toString());
                   return;
                 }
               } catch (error) {
+                console.log(`Error checking artifacts for run ${run.id}: ${error.message}`);
                 // Continue searching if this run doesn't have artifacts or API call fails
                 continue;
               }
             }
             
-            console.log('No state artifact found in recent workflow runs');
+            console.log('❌ No state artifact found in recent workflow runs');
             core.setOutput('run_id', '');
             core.setOutput('artifact_id', '');
 
@@ -497,6 +517,8 @@ jobs:
           script: |
             // Find the most recent workflow run (any status) that has the terraform-state artifact
             // State is uploaded with if: always(), so failed runs can also have updated state
+            console.log(`Searching for terraform-state artifact in workflow: terraform.yml`);
+            
             const { data: runs } = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -504,11 +526,14 @@ jobs:
               per_page: 50
             });
             
+            console.log(`Found ${runs.workflow_runs.length} workflow runs`);
+            
             // Search for the most recent run that has the terraform-state artifact
             // Runs are already sorted by most recent first
             for (const run of runs.workflow_runs) {
               // Only check completed runs (success, failure, cancelled, etc.)
               if (run.status !== 'completed') {
+                console.log(`Skipping run ${run.id} - status: ${run.status}`);
                 continue;
               }
               
@@ -519,20 +544,23 @@ jobs:
                   run_id: run.id
                 });
                 
+                console.log(`Run ${run.id} (${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.artifacts.length} artifact(s): ${artifacts.artifacts.map(a => a.name).join(', ')}`);
+                
                 const stateArtifact = artifacts.artifacts.find(a => a.name === 'terraform-state');
                 if (stateArtifact) {
-                  console.log(`Found state artifact in run ${run.id} (${run.conclusion || 'unknown'}, ${run.head_branch})`);
+                  console.log(`✅ Found state artifact in run ${run.id} (${run.conclusion || 'unknown'}, ${run.head_branch})`);
                   core.setOutput('run_id', run.id.toString());
                   core.setOutput('artifact_id', stateArtifact.id.toString());
                   return;
                 }
               } catch (error) {
+                console.log(`Error checking artifacts for run ${run.id}: ${error.message}`);
                 // Continue searching if this run doesn't have artifacts or API call fails
                 continue;
               }
             }
             
-            console.log('No state artifact found in recent workflow runs');
+            console.log('❌ No state artifact found in recent workflow runs');
             core.setOutput('run_id', '');
             core.setOutput('artifact_id', '');
 
