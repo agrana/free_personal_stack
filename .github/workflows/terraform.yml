@@ -36,14 +36,16 @@ jobs:
     name: Terraform Plan
     runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-    # Plan runs automatically - configure environment to NOT require approval
+    # Plan runs automatically on push/PR - configure environment to NOT require approval
+    # Also runs on workflow_dispatch with terraform_command: plan
     # Skip on initial commit - setup workflows need to run first
     if: |
       github.event_name == 'pull_request' ||
       (github.event_name == 'push' && 
        github.event.before != null && 
        github.event.before != '' && 
-       github.event.before != '0000000000000000000000000000000000000000')
+       github.event.before != '0000000000000000000000000000000000000000') ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.terraform_command == 'plan' || github.event.inputs.terraform_command == ''))
     
     defaults:
       run:
