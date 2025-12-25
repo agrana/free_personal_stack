@@ -258,15 +258,24 @@ jobs:
         id: download-plan
         with:
           name: terraform-plan
-          path: ${{ env.WORKING_DIRECTORY }}/
+          path: .
           # Downloads plan artifact from the plan job in the same workflow run
+          # Artifact preserves directory structure: terraform/tfplan
 
       - name: Verify Plan Artifact
         run: |
+          echo "Current working directory: $(pwd)"
+          echo "Working directory env: ${{ env.WORKING_DIRECTORY }}"
+          echo "Checking for plan file at ${{ env.WORKING_DIRECTORY }}/tfplan"
+          # Ensure the directory exists
+          mkdir -p "${{ env.WORKING_DIRECTORY }}"
           if [ ! -f "${{ env.WORKING_DIRECTORY }}/tfplan" ]; then
             echo "::error::Plan artifact not found at ${{ env.WORKING_DIRECTORY }}/tfplan"
+            echo "Available files in current directory:"
+            find . -name "tfplan" -o -name "*.tfplan" 2>/dev/null || true
+            ls -la . || true
             echo "Available files in ${{ env.WORKING_DIRECTORY }}:"
-            ls -la "${{ env.WORKING_DIRECTORY }}/" || true
+            ls -la "${{ env.WORKING_DIRECTORY }}/" 2>/dev/null || echo "Directory does not exist"
             exit 1
           fi
           echo "✅ Plan artifact found: ${{ env.WORKING_DIRECTORY }}/tfplan"
