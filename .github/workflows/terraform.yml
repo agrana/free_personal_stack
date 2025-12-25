@@ -2,7 +2,16 @@ name: Terraform Infrastructure
 
 on:
   workflow_dispatch:
-    # Manual trigger for destroy only (plan/apply run automatically)
+    inputs:
+      terraform_command:
+        description: 'Terraform command to run'
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+        default: plan
   push:
     branches:
       - main
@@ -26,7 +35,8 @@ jobs:
   plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
-    # No environment needed - plan runs automatically without approval
+    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    # Plan runs automatically - configure environment to NOT require approval
     # Skip on initial commit - setup workflows need to run first
     if: |
       github.event_name == 'pull_request' ||
@@ -466,10 +476,11 @@ jobs:
     needs: plan
     environment: 
       name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-      # Manual approval required for apply - configure in Settings → Environments → production → Required reviewers
+      # Manual approval required - configure in Settings → Environments → production → Required reviewers
     if: |
       github.event_name != 'pull_request' &&
-      needs.plan.result == 'success'
+      needs.plan.result == 'success' &&
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_command == 'apply')
     
     defaults:
       run:
