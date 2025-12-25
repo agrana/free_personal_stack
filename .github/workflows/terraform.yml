@@ -121,7 +121,9 @@ jobs:
             console.log(`Found ${runs.workflow_runs.length} workflow runs`);
             
             // Search for the most recent run with successful apply and state artifact
-            // Stop as soon as we find one since runs are sorted by most recent first
+            // Prioritize apply runs over destroy runs - apply has the actual infrastructure state
+            let bestApplyRun = null;
+            let bestDestroyRun = null;
             let fallbackRun = null;
             
             for (const run of runs.workflow_runs) {
@@ -172,22 +174,22 @@ jobs:
                   };
                   
                   if (applySucceeded) {
-                    // Found successful apply with state artifact - use it immediately
-                    console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
-                    console.log(`\n✅ Found successful apply with state artifact`);
-                    console.log(`   Using run ${runInfo.run_id} (Apply succeeded, State size: ${runInfo.artifact_size} bytes)`);
-                    core.setOutput('run_id', runInfo.run_id.toString());
-                    core.setOutput('artifact_id', runInfo.artifact_id.toString());
-                    return; // Stop searching - we found the best one
+                    // Found successful apply with state artifact - this is the best option
+                    if (!bestApplyRun) {
+                      bestApplyRun = runInfo;
+                      console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
+                    } else {
+                      console.log(`   ✅ State artifact found + Apply succeeded (already have a better one)`);
+                    }
+                    // Continue searching in case there's an even more recent apply
                   } else if (destroySucceeded) {
-                    // Found successful destroy with state artifact - use it (state will be empty/updated)
-                    console.log(`   ✅ State artifact found + Destroy succeeded`);
-                    console.log(`\n✅ Found successful destroy with state artifact`);
-                    console.log(`   Using run ${runInfo.run_id} (Destroy succeeded, State size: ${runInfo.artifact_size} bytes)`);
-                    console.log(`   Note: State may be empty if all resources were destroyed`);
-                    core.setOutput('run_id', runInfo.run_id.toString());
-                    core.setOutput('artifact_id', runInfo.artifact_id.toString());
-                    return; // Stop searching - destroy state is also valid
+                    // Found successful destroy - keep as fallback but continue searching for apply
+                    if (!bestDestroyRun) {
+                      bestDestroyRun = runInfo;
+                      console.log(`   ⚠️  State artifact found + Destroy succeeded (will use if no apply found)`);
+                    } else {
+                      console.log(`   ⚠️  State artifact found + Destroy succeeded (already have a better one)`);
+                    }
                   } else {
                     // Keep as fallback but continue searching for successful apply or destroy
                     if (!fallbackRun) {
@@ -199,9 +201,8 @@ jobs:
                   }
                 } else if (applySucceeded || destroySucceeded) {
                   // Apply succeeded but no state artifact - likely upload failed
-                  console.log(`   ⚠️  Apply succeeded but NO state artifact found`);
-                  console.log(`   This means resources were created but state wasn't uploaded`);
-                  console.log(`   You'll need to run apply again to create a proper state artifact`);
+                  console.log(`   ⚠️  ${applySucceeded ? 'Apply' : 'Destroy'} succeeded but NO state artifact found`);
+                  console.log(`   This means resources were ${applySucceeded ? 'created' : 'destroyed'} but state wasn't uploaded`);
                 }
               } catch (error) {
                 console.log(`   Error checking run ${run.id}: ${error.message}`);
@@ -209,9 +210,28 @@ jobs:
               }
             }
             
-            // Fallback to any run with state artifact if no successful apply found
+            // Use the best apply run if found (preferred)
+            if (bestApplyRun) {
+              console.log(`\n✅ Found successful apply with state artifact`);
+              console.log(`   Using run ${bestApplyRun.run_id} (Apply succeeded, State size: ${bestApplyRun.artifact_size} bytes)`);
+              core.setOutput('run_id', bestApplyRun.run_id.toString());
+              core.setOutput('artifact_id', bestApplyRun.artifact_id.toString());
+              return;
+            }
+            
+            // Fallback to destroy run if no apply found
+            if (bestDestroyRun) {
+              console.log(`\n⚠️  No successful apply found, using most recent destroy run`);
+              console.log(`   Using run ${bestDestroyRun.run_id} (Destroy succeeded, State size: ${bestDestroyRun.artifact_size} bytes)`);
+              console.log(`   ⚠️  Warning: State may be empty if all resources were destroyed`);
+              core.setOutput('run_id', bestDestroyRun.run_id.toString());
+              core.setOutput('artifact_id', bestDestroyRun.artifact_id.toString());
+              return;
+            }
+            
+            // Last resort: use any run with state artifact
             if (fallbackRun) {
-              console.log(`\n⚠️  No runs with successful apply found, using fallback run with state artifact`);
+              console.log(`\n⚠️  No runs with successful apply or destroy found, using fallback run with state artifact`);
               console.log(`   Using run ${fallbackRun.run_id} (Apply ${fallbackRun.apply_succeeded ? 'succeeded' : 'failed'}, State size: ${fallbackRun.artifact_size} bytes)`);
               console.log(`   ⚠️  Warning: This state may be incomplete or from a failed apply`);
               core.setOutput('run_id', fallbackRun.run_id.toString());
@@ -603,7 +623,9 @@ jobs:
             console.log(`Found ${runs.workflow_runs.length} workflow runs`);
             
             // Search for the most recent run with successful apply and state artifact
-            // Stop as soon as we find one since runs are sorted by most recent first
+            // Prioritize apply runs over destroy runs - apply has the actual infrastructure state
+            let bestApplyRun = null;
+            let bestDestroyRun = null;
             let fallbackRun = null;
             
             for (const run of runs.workflow_runs) {
@@ -654,22 +676,22 @@ jobs:
                   };
                   
                   if (applySucceeded) {
-                    // Found successful apply with state artifact - use it immediately
-                    console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
-                    console.log(`\n✅ Found successful apply with state artifact`);
-                    console.log(`   Using run ${runInfo.run_id} (Apply succeeded, State size: ${runInfo.artifact_size} bytes)`);
-                    core.setOutput('run_id', runInfo.run_id.toString());
-                    core.setOutput('artifact_id', runInfo.artifact_id.toString());
-                    return; // Stop searching - we found the best one
+                    // Found successful apply with state artifact - this is the best option
+                    if (!bestApplyRun) {
+                      bestApplyRun = runInfo;
+                      console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
+                    } else {
+                      console.log(`   ✅ State artifact found + Apply succeeded (already have a better one)`);
+                    }
+                    // Continue searching in case there's an even more recent apply
                   } else if (destroySucceeded) {
-                    // Found successful destroy with state artifact - use it (state will be empty/updated)
-                    console.log(`   ✅ State artifact found + Destroy succeeded`);
-                    console.log(`\n✅ Found successful destroy with state artifact`);
-                    console.log(`   Using run ${runInfo.run_id} (Destroy succeeded, State size: ${runInfo.artifact_size} bytes)`);
-                    console.log(`   Note: State may be empty if all resources were destroyed`);
-                    core.setOutput('run_id', runInfo.run_id.toString());
-                    core.setOutput('artifact_id', runInfo.artifact_id.toString());
-                    return; // Stop searching - destroy state is also valid
+                    // Found successful destroy - keep as fallback but continue searching for apply
+                    if (!bestDestroyRun) {
+                      bestDestroyRun = runInfo;
+                      console.log(`   ⚠️  State artifact found + Destroy succeeded (will use if no apply found)`);
+                    } else {
+                      console.log(`   ⚠️  State artifact found + Destroy succeeded (already have a better one)`);
+                    }
                   } else {
                     // Keep as fallback but continue searching for successful apply or destroy
                     if (!fallbackRun) {
@@ -681,9 +703,8 @@ jobs:
                   }
                 } else if (applySucceeded || destroySucceeded) {
                   // Apply succeeded but no state artifact - likely upload failed
-                  console.log(`   ⚠️  Apply succeeded but NO state artifact found`);
-                  console.log(`   This means resources were created but state wasn't uploaded`);
-                  console.log(`   You'll need to run apply again to create a proper state artifact`);
+                  console.log(`   ⚠️  ${applySucceeded ? 'Apply' : 'Destroy'} succeeded but NO state artifact found`);
+                  console.log(`   This means resources were ${applySucceeded ? 'created' : 'destroyed'} but state wasn't uploaded`);
                 }
               } catch (error) {
                 console.log(`   Error checking run ${run.id}: ${error.message}`);
@@ -691,9 +712,28 @@ jobs:
               }
             }
             
-            // Fallback to any run with state artifact if no successful apply found
+            // Use the best apply run if found (preferred)
+            if (bestApplyRun) {
+              console.log(`\n✅ Found successful apply with state artifact`);
+              console.log(`   Using run ${bestApplyRun.run_id} (Apply succeeded, State size: ${bestApplyRun.artifact_size} bytes)`);
+              core.setOutput('run_id', bestApplyRun.run_id.toString());
+              core.setOutput('artifact_id', bestApplyRun.artifact_id.toString());
+              return;
+            }
+            
+            // Fallback to destroy run if no apply found
+            if (bestDestroyRun) {
+              console.log(`\n⚠️  No successful apply found, using most recent destroy run`);
+              console.log(`   Using run ${bestDestroyRun.run_id} (Destroy succeeded, State size: ${bestDestroyRun.artifact_size} bytes)`);
+              console.log(`   ⚠️  Warning: State may be empty if all resources were destroyed`);
+              core.setOutput('run_id', bestDestroyRun.run_id.toString());
+              core.setOutput('artifact_id', bestDestroyRun.artifact_id.toString());
+              return;
+            }
+            
+            // Last resort: use any run with state artifact
             if (fallbackRun) {
-              console.log(`\n⚠️  No runs with successful apply found, using fallback run with state artifact`);
+              console.log(`\n⚠️  No runs with successful apply or destroy found, using fallback run with state artifact`);
               console.log(`   Using run ${fallbackRun.run_id} (Apply ${fallbackRun.apply_succeeded ? 'succeeded' : 'failed'}, State size: ${fallbackRun.artifact_size} bytes)`);
               console.log(`   ⚠️  Warning: This state may be incomplete or from a failed apply`);
               core.setOutput('run_id', fallbackRun.run_id.toString());
@@ -939,7 +979,9 @@ jobs:
             console.log(`Found ${runs.workflow_runs.length} workflow runs`);
             
             // Search for the most recent run with successful apply and state artifact
-            // Stop as soon as we find one since runs are sorted by most recent first
+            // Prioritize apply runs over destroy runs - apply has the actual infrastructure state
+            let bestApplyRun = null;
+            let bestDestroyRun = null;
             let fallbackRun = null;
             
             for (const run of runs.workflow_runs) {
@@ -990,22 +1032,22 @@ jobs:
                   };
                   
                   if (applySucceeded) {
-                    // Found successful apply with state artifact - use it immediately
-                    console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
-                    console.log(`\n✅ Found successful apply with state artifact`);
-                    console.log(`   Using run ${runInfo.run_id} (Apply succeeded, State size: ${runInfo.artifact_size} bytes)`);
-                    core.setOutput('run_id', runInfo.run_id.toString());
-                    core.setOutput('artifact_id', runInfo.artifact_id.toString());
-                    return; // Stop searching - we found the best one
+                    // Found successful apply with state artifact - this is the best option
+                    if (!bestApplyRun) {
+                      bestApplyRun = runInfo;
+                      console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
+                    } else {
+                      console.log(`   ✅ State artifact found + Apply succeeded (already have a better one)`);
+                    }
+                    // Continue searching in case there's an even more recent apply
                   } else if (destroySucceeded) {
-                    // Found successful destroy with state artifact - use it (state will be empty/updated)
-                    console.log(`   ✅ State artifact found + Destroy succeeded`);
-                    console.log(`\n✅ Found successful destroy with state artifact`);
-                    console.log(`   Using run ${runInfo.run_id} (Destroy succeeded, State size: ${runInfo.artifact_size} bytes)`);
-                    console.log(`   Note: State may be empty if all resources were destroyed`);
-                    core.setOutput('run_id', runInfo.run_id.toString());
-                    core.setOutput('artifact_id', runInfo.artifact_id.toString());
-                    return; // Stop searching - destroy state is also valid
+                    // Found successful destroy - keep as fallback but continue searching for apply
+                    if (!bestDestroyRun) {
+                      bestDestroyRun = runInfo;
+                      console.log(`   ⚠️  State artifact found + Destroy succeeded (will use if no apply found)`);
+                    } else {
+                      console.log(`   ⚠️  State artifact found + Destroy succeeded (already have a better one)`);
+                    }
                   } else {
                     // Keep as fallback but continue searching for successful apply or destroy
                     if (!fallbackRun) {
@@ -1017,9 +1059,8 @@ jobs:
                   }
                 } else if (applySucceeded || destroySucceeded) {
                   // Apply succeeded but no state artifact - likely upload failed
-                  console.log(`   ⚠️  Apply succeeded but NO state artifact found`);
-                  console.log(`   This means resources were created but state wasn't uploaded`);
-                  console.log(`   You'll need to run apply again to create a proper state artifact`);
+                  console.log(`   ⚠️  ${applySucceeded ? 'Apply' : 'Destroy'} succeeded but NO state artifact found`);
+                  console.log(`   This means resources were ${applySucceeded ? 'created' : 'destroyed'} but state wasn't uploaded`);
                 }
               } catch (error) {
                 console.log(`   Error checking run ${run.id}: ${error.message}`);
@@ -1027,9 +1068,28 @@ jobs:
               }
             }
             
-            // Fallback to any run with state artifact if no successful apply found
+            // Use the best apply run if found (preferred)
+            if (bestApplyRun) {
+              console.log(`\n✅ Found successful apply with state artifact`);
+              console.log(`   Using run ${bestApplyRun.run_id} (Apply succeeded, State size: ${bestApplyRun.artifact_size} bytes)`);
+              core.setOutput('run_id', bestApplyRun.run_id.toString());
+              core.setOutput('artifact_id', bestApplyRun.artifact_id.toString());
+              return;
+            }
+            
+            // Fallback to destroy run if no apply found
+            if (bestDestroyRun) {
+              console.log(`\n⚠️  No successful apply found, using most recent destroy run`);
+              console.log(`   Using run ${bestDestroyRun.run_id} (Destroy succeeded, State size: ${bestDestroyRun.artifact_size} bytes)`);
+              console.log(`   ⚠️  Warning: State may be empty if all resources were destroyed`);
+              core.setOutput('run_id', bestDestroyRun.run_id.toString());
+              core.setOutput('artifact_id', bestDestroyRun.artifact_id.toString());
+              return;
+            }
+            
+            // Last resort: use any run with state artifact
             if (fallbackRun) {
-              console.log(`\n⚠️  No runs with successful apply found, using fallback run with state artifact`);
+              console.log(`\n⚠️  No runs with successful apply or destroy found, using fallback run with state artifact`);
               console.log(`   Using run ${fallbackRun.run_id} (Apply ${fallbackRun.apply_succeeded ? 'succeeded' : 'failed'}, State size: ${fallbackRun.artifact_size} bytes)`);
               console.log(`   ⚠️  Warning: This state may be incomplete or from a failed apply`);
               core.setOutput('run_id', fallbackRun.run_id.toString());
