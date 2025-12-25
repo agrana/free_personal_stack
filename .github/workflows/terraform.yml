@@ -446,9 +446,15 @@ jobs:
           echo "## 🔍 Verifying State File After Terraform Init" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
+          echo "🔍 Verifying state file after terraform init:"
+          echo "   State file path: $STATE_FILE"
+          
           if [ -f "$STATE_FILE" ]; then
+            echo "✅ State file exists at: $STATE_FILE"
             echo "✅ State file exists at: $STATE_FILE" >> $GITHUB_STEP_SUMMARY
-            echo "State file size: $(wc -c < "$STATE_FILE") bytes" >> $GITHUB_STEP_SUMMARY
+            STATE_SIZE=$(wc -c < "$STATE_FILE")
+            echo "   State file size: $STATE_SIZE bytes"
+            echo "State file size: $STATE_SIZE bytes" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             
             # Check if it's valid JSON
@@ -461,7 +467,18 @@ jobs:
               
               # Count resources
               RESOURCE_COUNT=$(jq -r '[.resources[]?] | length' "$STATE_FILE" 2>/dev/null || echo "0")
+              MANAGED_COUNT=$(jq -r '[.resources[]? | select(.mode == "managed" and .type != "null_resource")] | length' "$STATE_FILE" 2>/dev/null || echo "0")
+              echo "   Total resources in state: $RESOURCE_COUNT"
+              echo "   Managed resources (excluding null_resource): $MANAGED_COUNT"
               echo "Resources in state: $RESOURCE_COUNT" >> $GITHUB_STEP_SUMMARY
+              echo "Managed resources: $MANAGED_COUNT" >> $GITHUB_STEP_SUMMARY
+              
+              if [ "$MANAGED_COUNT" -eq "0" ]; then
+                echo "⚠️  WARNING: State file has no managed resources!"
+                echo "⚠️  WARNING: State file has no managed resources!" >> $GITHUB_STEP_SUMMARY
+                echo "   This state is likely from a failed or incomplete apply"
+                echo "   Terraform plan may show resources that should already exist"
+              fi
               
               # List resource types
               echo "" >> $GITHUB_STEP_SUMMARY
