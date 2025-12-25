@@ -977,21 +977,66 @@ jobs:
       - name: Decrypt Terraform State (if exists)
         if: steps.download-state.outcome == 'success'
         run: |
-          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" ]; then
+          # Use absolute paths since we're running from workspace root
+          STATE_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
+          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
+          BACKUP_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted"
+          BACKUP_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup"
+          
+          echo "Checking for encrypted state file at: $STATE_ENC"
+          if [ -f "$STATE_ENC" ]; then
+            echo "✅ Found encrypted state file, decrypting..."
             openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" \
-              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" \
+              -in "$STATE_ENC" \
+              -out "$STATE_FILE" \
               -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "State file decrypted successfully"
+            echo "✅ State file decrypted successfully"
+            ls -lh "$STATE_FILE"
+            echo "State file size: $(wc -c < "$STATE_FILE") bytes"
+          else
+            echo "⚠️  Encrypted state file not found at $STATE_ENC"
+            echo "Files in ${{ env.WORKING_DIRECTORY }}:"
+            ls -la "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" || echo "Directory not found"
           fi
-          if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted" ]; then
+          
+          if [ -f "$BACKUP_ENC" ]; then
+            echo "✅ Found encrypted backup file, decrypting..."
             openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted" \
-              -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup" \
+              -in "$BACKUP_ENC" \
+              -out "$BACKUP_FILE" \
               -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "State backup file decrypted successfully"
+            echo "✅ State backup file decrypted successfully"
+            ls -lh "$BACKUP_FILE"
           fi
         continue-on-error: true
+
+      - name: Verify State File Before Destroy
+        run: |
+          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
+          echo "Verifying state file before destroy:"
+          if [ -f "$STATE_FILE" ]; then
+            echo "✅ State file exists at: $STATE_FILE"
+            ls -lh "$STATE_FILE"
+            echo "State file size: $(wc -c < "$STATE_FILE") bytes"
+            
+            # Check if it's valid JSON and has resources
+            if jq empty "$STATE_FILE" 2>/dev/null; then
+              RESOURCE_COUNT=$(jq -r '[.resources[]?] | length' "$STATE_FILE" 2>/dev/null || echo "0")
+              echo "Resources in state: $RESOURCE_COUNT"
+              if [ "$RESOURCE_COUNT" -eq "0" ]; then
+                echo "⚠️  State file has no resources - nothing to destroy"
+              else
+                echo "✅ State file contains $RESOURCE_COUNT resource(s) to destroy"
+              fi
+            else
+              echo "⚠️  State file is not valid JSON"
+            fi
+          else
+            echo "❌ No state file found at $STATE_FILE"
+            echo "Terraform will have no state to destroy"
+            echo "Files in ${{ env.WORKING_DIRECTORY }}:"
+            ls -la "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" || echo "Directory not found"
+          fi
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
