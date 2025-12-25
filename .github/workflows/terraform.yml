@@ -201,7 +201,8 @@ jobs:
   apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
-    needs: plan
+    # Remove needs: plan so apply can run independently after plan completes
+    # Apply will download plan artifact from the most recent plan run
     environment: 
       name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
       # Require manual approval for apply
@@ -273,10 +274,20 @@ jobs:
 
       - name: Download Plan Artifact
         uses: dawidd6/action-download-artifact@v3
+        id: download-plan
+        continue-on-error: true
         with:
           name: terraform-plan
           path: ${{ env.WORKING_DIRECTORY }}/
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Downloads from latest workflow run that has this artifact
+
+      - name: Check Plan Artifact Exists
+        if: steps.download-plan.outcome != 'success'
+        run: |
+          echo "::error::Plan artifact not found. Please run 'plan' first."
+          echo "::error::Go to Actions → Terraform Infrastructure → Run workflow → Select 'plan'"
+          exit 1
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
