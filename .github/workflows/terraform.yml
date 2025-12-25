@@ -207,7 +207,9 @@ jobs:
       name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
       # Require manual approval for apply
       # Go to Settings → Environments → production → Add protection rule → Required reviewers
-    if: github.event.inputs.terraform_command == 'apply'
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.terraform_command == 'apply'
     
     defaults:
       run:
