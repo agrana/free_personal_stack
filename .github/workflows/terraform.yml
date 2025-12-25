@@ -126,14 +126,18 @@ jobs:
                 
                 // The API returns { artifacts: [...] }, so access artifacts.artifacts
                 const artifacts = artifactsResponse.artifacts || [];
-                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.length} artifact(s): ${artifacts.map(a => a.name).join(', ')}`);
+                const artifactNames = artifacts.map(a => a.name);
+                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.length} artifact(s): ${artifactNames.join(', ')}`);
                 
                 const stateArtifact = artifacts.find(a => a.name === 'terraform-state');
                 if (stateArtifact) {
                   console.log(`✅ Found state artifact in run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
+                  console.log(`   Artifact ID: ${stateArtifact.id}, Size: ${stateArtifact.size_in_bytes} bytes`);
                   core.setOutput('run_id', run.id.toString());
                   core.setOutput('artifact_id', stateArtifact.id.toString());
                   return;
+                } else {
+                  console.log(`   No terraform-state artifact found (checked: ${artifactNames.join(', ')})`);
                 }
               } catch (error) {
                 console.log(`Error checking artifacts for run ${run.id}: ${error.message}`);
@@ -331,14 +335,18 @@ jobs:
                 
                 // The API returns { artifacts: [...] }, so access artifacts.artifacts
                 const artifacts = artifactsResponse.artifacts || [];
-                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.length} artifact(s): ${artifacts.map(a => a.name).join(', ')}`);
+                const artifactNames = artifacts.map(a => a.name);
+                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.length} artifact(s): ${artifactNames.join(', ')}`);
                 
                 const stateArtifact = artifacts.find(a => a.name === 'terraform-state');
                 if (stateArtifact) {
                   console.log(`✅ Found state artifact in run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
+                  console.log(`   Artifact ID: ${stateArtifact.id}, Size: ${stateArtifact.size_in_bytes} bytes`);
                   core.setOutput('run_id', run.id.toString());
                   core.setOutput('artifact_id', stateArtifact.id.toString());
                   return;
+                } else {
+                  console.log(`   No terraform-state artifact found (checked: ${artifactNames.join(', ')})`);
                 }
               } catch (error) {
                 console.log(`Error checking artifacts for run ${run.id}: ${error.message}`);
@@ -581,14 +589,18 @@ jobs:
                 
                 // The API returns { artifacts: [...] }, so access artifacts.artifacts
                 const artifacts = artifactsResponse.artifacts || [];
-                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.length} artifact(s): ${artifacts.map(a => a.name).join(', ')}`);
+                const artifactNames = artifacts.map(a => a.name);
+                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.length} artifact(s): ${artifactNames.join(', ')}`);
                 
                 const stateArtifact = artifacts.find(a => a.name === 'terraform-state');
                 if (stateArtifact) {
                   console.log(`✅ Found state artifact in run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
+                  console.log(`   Artifact ID: ${stateArtifact.id}, Size: ${stateArtifact.size_in_bytes} bytes`);
                   core.setOutput('run_id', run.id.toString());
                   core.setOutput('artifact_id', stateArtifact.id.toString());
                   return;
+                } else {
+                  console.log(`   No terraform-state artifact found (checked: ${artifactNames.join(', ')})`);
                 }
               } catch (error) {
                 console.log(`Error checking artifacts for run ${run.id}: ${error.message}`);
