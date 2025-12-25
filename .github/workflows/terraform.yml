@@ -814,8 +814,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: 
       name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-      # Manual approval required for destroy
-    if: github.event_name == 'workflow_dispatch'
+      # Manual approval required - configure in Settings → Environments → production → Required reviewers
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.terraform_command == 'destroy'
     
     defaults:
       run:
