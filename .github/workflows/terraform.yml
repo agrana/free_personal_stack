@@ -256,30 +256,32 @@ jobs:
       - name: Download Plan Artifact
         uses: actions/download-artifact@v4
         id: download-plan
+        # Download to workspace root (not working directory) to preserve artifact structure
+        # Artifact was uploaded from ./terraform/tfplan, so it will extract to ./terraform/tfplan
         with:
           name: terraform-plan
-          path: .
-          # Downloads plan artifact from the plan job in the same workflow run
-          # Artifact preserves directory structure: terraform/tfplan
+          path: ${{ github.workspace }}
 
       - name: Verify Plan Artifact
         run: |
           echo "Current working directory: $(pwd)"
-          echo "Working directory env: ${{ env.WORKING_DIRECTORY }}"
-          echo "Checking for plan file at ${{ env.WORKING_DIRECTORY }}/tfplan"
-          # Ensure the directory exists
-          mkdir -p "${{ env.WORKING_DIRECTORY }}"
-          if [ ! -f "${{ env.WORKING_DIRECTORY }}/tfplan" ]; then
-            echo "::error::Plan artifact not found at ${{ env.WORKING_DIRECTORY }}/tfplan"
-            echo "Available files in current directory:"
-            find . -name "tfplan" -o -name "*.tfplan" 2>/dev/null || true
-            ls -la . || true
-            echo "Available files in ${{ env.WORKING_DIRECTORY }}:"
-            ls -la "${{ env.WORKING_DIRECTORY }}/" 2>/dev/null || echo "Directory does not exist"
+          echo "Workspace: ${{ github.workspace }}"
+          echo "Working directory: ${{ env.WORKING_DIRECTORY }}"
+          # Artifact should be at workspace/terraform/tfplan (preserves upload path structure)
+          PLAN_PATH="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/tfplan"
+          if [ -f "$PLAN_PATH" ]; then
+            echo "✅ Plan artifact found at $PLAN_PATH"
+            ls -lh "$PLAN_PATH"
+          else
+            echo "::error::Plan artifact not found at $PLAN_PATH"
+            echo "Searching for tfplan files in workspace:"
+            find "${{ github.workspace }}" -name "tfplan" -o -name "*.tfplan" 2>/dev/null || true
+            echo "Files in workspace root:"
+            ls -la "${{ github.workspace }}" || true
+            echo "Files in ${{ env.WORKING_DIRECTORY }}:"
+            ls -la "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" 2>/dev/null || echo "Directory does not exist"
             exit 1
           fi
-          echo "✅ Plan artifact found: ${{ env.WORKING_DIRECTORY }}/tfplan"
-          ls -lh "${{ env.WORKING_DIRECTORY }}/tfplan"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
