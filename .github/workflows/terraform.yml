@@ -180,13 +180,12 @@ jobs:
                   
                   if (applySucceeded) {
                     // Found successful apply with state artifact - this is the best option
-                    if (!bestApplyRun) {
-                      bestApplyRun = runInfo;
-                      console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
-                    } else {
-                      console.log(`   ✅ State artifact found + Apply succeeded (already have a better one)`);
-                    }
-                    // Continue searching in case there's an even more recent apply
+                    // Since runs are sorted by most recent first, the first apply we find is the most recent
+                    bestApplyRun = runInfo;
+                    console.log(`   ✅ State artifact found + Apply succeeded (preferred - most recent)`);
+                    console.log(`   Stopping search - this is the most recent successful apply`);
+                    // Break out of the loop - we found the most recent successful apply
+                    break;
                   } else if (destroySucceeded) {
                     // Found successful destroy - keep as fallback but continue searching for apply
                     if (!bestDestroyRun) {
@@ -687,13 +686,12 @@ jobs:
                   
                   if (applySucceeded) {
                     // Found successful apply with state artifact - this is the best option
-                    if (!bestApplyRun) {
-                      bestApplyRun = runInfo;
-                      console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
-                    } else {
-                      console.log(`   ✅ State artifact found + Apply succeeded (already have a better one)`);
-                    }
-                    // Continue searching in case there's an even more recent apply
+                    // Since runs are sorted by most recent first, the first apply we find is the most recent
+                    bestApplyRun = runInfo;
+                    console.log(`   ✅ State artifact found + Apply succeeded (preferred - most recent)`);
+                    console.log(`   Stopping search - this is the most recent successful apply`);
+                    // Break out of the loop - we found the most recent successful apply
+                    break;
                   } else if (destroySucceeded) {
                     // Found successful destroy - keep as fallback but continue searching for apply
                     if (!bestDestroyRun) {
@@ -1048,13 +1046,12 @@ jobs:
                   
                   if (applySucceeded) {
                     // Found successful apply with state artifact - this is the best option
-                    if (!bestApplyRun) {
-                      bestApplyRun = runInfo;
-                      console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
-                    } else {
-                      console.log(`   ✅ State artifact found + Apply succeeded (already have a better one)`);
-                    }
-                    // Continue searching in case there's an even more recent apply
+                    // Since runs are sorted by most recent first, the first apply we find is the most recent
+                    bestApplyRun = runInfo;
+                    console.log(`   ✅ State artifact found + Apply succeeded (preferred - most recent)`);
+                    console.log(`   Stopping search - this is the most recent successful apply`);
+                    // Break out of the loop - we found the most recent successful apply
+                    break;
                   } else if (destroySucceeded) {
                     // Found successful destroy - keep as fallback but continue searching for apply
                     if (!bestDestroyRun) {
