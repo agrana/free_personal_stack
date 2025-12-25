@@ -455,6 +455,31 @@ jobs:
             ls -lh "$BACKUP_ENCRYPTED"
           fi
 
+      - name: Verify Encrypted State Files Before Upload
+        if: always()
+        run: |
+          STATE_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
+          BACKUP_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted"
+          
+          echo "Checking for encrypted state files:"
+          echo "State encrypted: $STATE_ENC"
+          if [ -f "$STATE_ENC" ]; then
+            echo "✅ State encrypted file exists: $(ls -lh "$STATE_ENC")"
+          else
+            echo "⚠️  State encrypted file NOT found at $STATE_ENC"
+          fi
+          
+          echo "Backup encrypted: $BACKUP_ENC"
+          if [ -f "$BACKUP_ENC" ]; then
+            echo "✅ Backup encrypted file exists: $(ls -lh "$BACKUP_ENC")"
+          else
+            echo "ℹ️  Backup encrypted file not found (this is OK if no backup exists)"
+          fi
+          
+          echo ""
+          echo "All files in working directory:"
+          ls -lah "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" || echo "Directory not found"
+
       - name: Upload Encrypted Terraform State
         if: always()
         uses: actions/upload-artifact@v4
@@ -640,6 +665,31 @@ jobs:
             echo "✅ State backup file encrypted successfully"
             ls -lh "$BACKUP_ENCRYPTED"
           fi
+
+      - name: Verify Encrypted State Files Before Upload
+        if: always()
+        run: |
+          STATE_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
+          BACKUP_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted"
+          
+          echo "Checking for encrypted state files:"
+          echo "State encrypted: $STATE_ENC"
+          if [ -f "$STATE_ENC" ]; then
+            echo "✅ State encrypted file exists: $(ls -lh "$STATE_ENC")"
+          else
+            echo "⚠️  State encrypted file NOT found at $STATE_ENC"
+          fi
+          
+          echo "Backup encrypted: $BACKUP_ENC"
+          if [ -f "$BACKUP_ENC" ]; then
+            echo "✅ Backup encrypted file exists: $(ls -lh "$BACKUP_ENC")"
+          else
+            echo "ℹ️  Backup encrypted file not found (this is OK if no backup exists)"
+          fi
+          
+          echo ""
+          echo "All files in working directory:"
+          ls -lah "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" || echo "Directory not found"
 
       - name: Upload Encrypted Terraform State
         if: always()
