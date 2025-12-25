@@ -116,29 +116,7 @@ jobs:
               }
               
               try {
-                // Check if the apply job in this run has completed (which would have uploaded state)
-                // Artifacts are only available after the job that uploads them completes
-                let applyJobCompleted = false;
-                try {
-                  const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    run_id: run.id
-                  });
-                  
-                  const applyJob = jobs.jobs.find(job => job.name === 'Terraform Apply');
-                  if (applyJob && applyJob.status === 'completed') {
-                    applyJobCompleted = true;
-                    console.log(`Run ${run.id} - Apply job completed (${applyJob.conclusion || 'unknown'})`);
-                  } else if (applyJob) {
-                    console.log(`Run ${run.id} - Apply job status: ${applyJob.status}`);
-                  }
-                } catch (jobError) {
-                  // If we can't check jobs, still try to check artifacts
-                  console.log(`Could not check jobs for run ${run.id}: ${jobError.message}`);
-                }
-                
-                // Check artifacts - they're available if the apply job completed
+                // Check artifacts directly - this is the most reliable way
                 const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -153,8 +131,6 @@ jobs:
                   core.setOutput('run_id', run.id.toString());
                   core.setOutput('artifact_id', stateArtifact.id.toString());
                   return;
-                } else if (applyJobCompleted) {
-                  console.log(`⚠️  Run ${run.id} has completed apply job but no state artifact found`);
                 }
               } catch (error) {
                 console.log(`Error checking artifacts for run ${run.id}: ${error.message}`);
@@ -342,29 +318,7 @@ jobs:
               }
               
               try {
-                // Check if the apply job in this run has completed (which would have uploaded state)
-                // Artifacts are only available after the job that uploads them completes
-                let applyJobCompleted = false;
-                try {
-                  const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    run_id: run.id
-                  });
-                  
-                  const applyJob = jobs.jobs.find(job => job.name === 'Terraform Apply');
-                  if (applyJob && applyJob.status === 'completed') {
-                    applyJobCompleted = true;
-                    console.log(`Run ${run.id} - Apply job completed (${applyJob.conclusion || 'unknown'})`);
-                  } else if (applyJob) {
-                    console.log(`Run ${run.id} - Apply job status: ${applyJob.status}`);
-                  }
-                } catch (jobError) {
-                  // If we can't check jobs, still try to check artifacts
-                  console.log(`Could not check jobs for run ${run.id}: ${jobError.message}`);
-                }
-                
-                // Check artifacts - they're available if the apply job completed
+                // Check artifacts directly - this is the most reliable way
                 const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -379,8 +333,6 @@ jobs:
                   core.setOutput('run_id', run.id.toString());
                   core.setOutput('artifact_id', stateArtifact.id.toString());
                   return;
-                } else if (applyJobCompleted) {
-                  console.log(`⚠️  Run ${run.id} has completed apply job but no state artifact found`);
                 }
               } catch (error) {
                 console.log(`Error checking artifacts for run ${run.id}: ${error.message}`);
@@ -613,29 +565,7 @@ jobs:
               }
               
               try {
-                // Check if the apply job in this run has completed (which would have uploaded state)
-                // Artifacts are only available after the job that uploads them completes
-                let applyJobCompleted = false;
-                try {
-                  const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    run_id: run.id
-                  });
-                  
-                  const applyJob = jobs.jobs.find(job => job.name === 'Terraform Apply');
-                  if (applyJob && applyJob.status === 'completed') {
-                    applyJobCompleted = true;
-                    console.log(`Run ${run.id} - Apply job completed (${applyJob.conclusion || 'unknown'})`);
-                  } else if (applyJob) {
-                    console.log(`Run ${run.id} - Apply job status: ${applyJob.status}`);
-                  }
-                } catch (jobError) {
-                  // If we can't check jobs, still try to check artifacts
-                  console.log(`Could not check jobs for run ${run.id}: ${jobError.message}`);
-                }
-                
-                // Check artifacts - they're available if the apply job completed
+                // Check artifacts directly - this is the most reliable way
                 const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -650,8 +580,6 @@ jobs:
                   core.setOutput('run_id', run.id.toString());
                   core.setOutput('artifact_id', stateArtifact.id.toString());
                   return;
-                } else if (applyJobCompleted) {
-                  console.log(`⚠️  Run ${run.id} has completed apply job but no state artifact found`);
                 }
               } catch (error) {
                 console.log(`Error checking artifacts for run ${run.id}: ${error.message}`);
