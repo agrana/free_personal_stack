@@ -254,12 +254,23 @@ jobs:
         continue-on-error: true
 
       - name: Download Plan Artifact
-        uses: dawidd6/action-download-artifact@v3
+        uses: actions/download-artifact@v4
+        id: download-plan
         with:
           name: terraform-plan
           path: ${{ env.WORKING_DIRECTORY }}/
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           # Downloads plan artifact from the plan job in the same workflow run
+
+      - name: Verify Plan Artifact
+        run: |
+          if [ ! -f "${{ env.WORKING_DIRECTORY }}/tfplan" ]; then
+            echo "::error::Plan artifact not found at ${{ env.WORKING_DIRECTORY }}/tfplan"
+            echo "Available files in ${{ env.WORKING_DIRECTORY }}:"
+            ls -la "${{ env.WORKING_DIRECTORY }}/" || true
+            exit 1
+          fi
+          echo "✅ Plan artifact found: ${{ env.WORKING_DIRECTORY }}/tfplan"
+          ls -lh "${{ env.WORKING_DIRECTORY }}/tfplan"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
