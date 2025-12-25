@@ -26,7 +26,7 @@ jobs:
   plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
-    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    # No environment needed - plan runs automatically without approval
     # Skip on initial commit - setup workflows need to run first
     if: |
       github.event_name == 'pull_request' ||
@@ -466,7 +466,7 @@ jobs:
     needs: plan
     environment: 
       name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-      # Manual approval required - configure in Settings → Environments → production → Required reviewers
+      # Manual approval required for apply - configure in Settings → Environments → production → Required reviewers
     if: |
       github.event_name != 'pull_request' &&
       needs.plan.result == 'success'
