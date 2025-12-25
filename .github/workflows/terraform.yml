@@ -93,9 +93,10 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // Find the most recent workflow run (any status) that has the terraform-state artifact
-            // State is uploaded with if: always(), so failed runs can also have updated state
+            // Find the most recent workflow run where apply succeeded and has the terraform-state artifact
+            // Prefer runs where apply succeeded, as they have the complete state
             console.log(`Searching for terraform-state artifact in workflow: terraform.yml`);
+            console.log(`Preferring runs where Terraform Apply job succeeded`);
             
             const { data: runs } = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
@@ -106,47 +107,89 @@ jobs:
             
             console.log(`Found ${runs.workflow_runs.length} workflow runs`);
             
-            // Search for the most recent run that has the terraform-state artifact
-            // Runs are already sorted by most recent first
+            // First pass: Look for runs where apply succeeded
+            const runsWithSuccessfulApply = [];
+            const runsWithStateArtifact = [];
+            
             for (const run of runs.workflow_runs) {
               // Only skip queued runs - artifacts are available even for in_progress runs
-              // (artifacts are uploaded as soon as the job completes, not when the workflow completes)
               if (run.status === 'queued') {
                 console.log(`Skipping run ${run.id} - status: ${run.status}`);
                 continue;
               }
               
               try {
-                // Check artifacts directly - this is the most reliable way
+                // Check if apply job succeeded
+                const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: run.id
+                });
+                
+                const applyJob = jobs.jobs.find(job => job.name === 'Terraform Apply');
+                const applySucceeded = applyJob && applyJob.conclusion === 'success';
+                
+                // Check artifacts
                 const { data: artifactsResponse } = await github.rest.actions.listWorkflowRunArtifacts({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   run_id: run.id
                 });
                 
-                // The API returns { artifacts: [...] }, so access artifacts.artifacts
                 const artifacts = artifactsResponse.artifacts || [];
                 const artifactNames = artifacts.map(a => a.name);
-                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.length} artifact(s): ${artifactNames.join(', ')}`);
-                
                 const stateArtifact = artifacts.find(a => a.name === 'terraform-state');
+                
+                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
+                console.log(`   Apply job: ${applyJob ? `${applyJob.name} (${applyJob.conclusion || 'unknown'})` : 'not found'}`);
+                console.log(`   Artifacts: ${artifactNames.join(', ') || 'none'}`);
+                
                 if (stateArtifact) {
-                  console.log(`✅ Found state artifact in run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
-                  console.log(`   Artifact ID: ${stateArtifact.id}, Size: ${stateArtifact.size_in_bytes} bytes`);
-                  core.setOutput('run_id', run.id.toString());
-                  core.setOutput('artifact_id', stateArtifact.id.toString());
-                  return;
-                } else {
-                  console.log(`   No terraform-state artifact found (checked: ${artifactNames.join(', ')})`);
+                  const runInfo = {
+                    run_id: run.id,
+                    artifact_id: stateArtifact.id,
+                    artifact_size: stateArtifact.size_in_bytes,
+                    apply_succeeded: applySucceeded,
+                    run_status: run.status,
+                    run_conclusion: run.conclusion
+                  };
+                  
+                  if (applySucceeded) {
+                    runsWithSuccessfulApply.push(runInfo);
+                    console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
+                  } else {
+                    runsWithStateArtifact.push(runInfo);
+                    console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'}`);
+                  }
                 }
               } catch (error) {
-                console.log(`Error checking artifacts for run ${run.id}: ${error.message}`);
-                // Continue searching if this run doesn't have artifacts or API call fails
+                console.log(`   Error checking run ${run.id}: ${error.message}`);
                 continue;
               }
             }
             
-            console.log('❌ No state artifact found in recent workflow runs');
+            // Prefer runs where apply succeeded
+            if (runsWithSuccessfulApply.length > 0) {
+              const bestRun = runsWithSuccessfulApply[0]; // Already sorted by most recent
+              console.log(`\n✅ Found ${runsWithSuccessfulApply.length} run(s) with successful apply and state artifact`);
+              console.log(`   Using run ${bestRun.run_id} (Apply succeeded, State size: ${bestRun.artifact_size} bytes)`);
+              core.setOutput('run_id', bestRun.run_id.toString());
+              core.setOutput('artifact_id', bestRun.artifact_id.toString());
+              return;
+            }
+            
+            // Fallback to any run with state artifact if no successful apply found
+            if (runsWithStateArtifact.length > 0) {
+              const bestRun = runsWithStateArtifact[0];
+              console.log(`\n⚠️  No runs with successful apply found, using run with state artifact`);
+              console.log(`   Using run ${bestRun.run_id} (Apply ${bestRun.apply_succeeded ? 'succeeded' : 'failed'}, State size: ${bestRun.artifact_size} bytes)`);
+              console.log(`   ⚠️  Warning: This state may be incomplete or from a failed apply`);
+              core.setOutput('run_id', bestRun.run_id.toString());
+              core.setOutput('artifact_id', bestRun.artifact_id.toString());
+              return;
+            }
+            
+            console.log('\n❌ No state artifact found in recent workflow runs');
             core.setOutput('run_id', '');
             core.setOutput('artifact_id', '');
 
@@ -401,9 +444,10 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // Find the most recent workflow run (any status) that has the terraform-state artifact
-            // State is uploaded with if: always(), so failed runs can also have updated state
+            // Find the most recent workflow run where apply succeeded and has the terraform-state artifact
+            // Prefer runs where apply succeeded, as they have the complete state
             console.log(`Searching for terraform-state artifact in workflow: terraform.yml`);
+            console.log(`Preferring runs where Terraform Apply job succeeded`);
             
             const { data: runs } = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
@@ -414,47 +458,89 @@ jobs:
             
             console.log(`Found ${runs.workflow_runs.length} workflow runs`);
             
-            // Search for the most recent run that has the terraform-state artifact
-            // Runs are already sorted by most recent first
+            // First pass: Look for runs where apply succeeded
+            const runsWithSuccessfulApply = [];
+            const runsWithStateArtifact = [];
+            
             for (const run of runs.workflow_runs) {
               // Only skip queued runs - artifacts are available even for in_progress runs
-              // (artifacts are uploaded as soon as the job completes, not when the workflow completes)
               if (run.status === 'queued') {
                 console.log(`Skipping run ${run.id} - status: ${run.status}`);
                 continue;
               }
               
               try {
-                // Check artifacts directly - this is the most reliable way
+                // Check if apply job succeeded
+                const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: run.id
+                });
+                
+                const applyJob = jobs.jobs.find(job => job.name === 'Terraform Apply');
+                const applySucceeded = applyJob && applyJob.conclusion === 'success';
+                
+                // Check artifacts
                 const { data: artifactsResponse } = await github.rest.actions.listWorkflowRunArtifacts({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   run_id: run.id
                 });
                 
-                // The API returns { artifacts: [...] }, so access artifacts.artifacts
                 const artifacts = artifactsResponse.artifacts || [];
                 const artifactNames = artifacts.map(a => a.name);
-                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.length} artifact(s): ${artifactNames.join(', ')}`);
-                
                 const stateArtifact = artifacts.find(a => a.name === 'terraform-state');
+                
+                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
+                console.log(`   Apply job: ${applyJob ? `${applyJob.name} (${applyJob.conclusion || 'unknown'})` : 'not found'}`);
+                console.log(`   Artifacts: ${artifactNames.join(', ') || 'none'}`);
+                
                 if (stateArtifact) {
-                  console.log(`✅ Found state artifact in run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
-                  console.log(`   Artifact ID: ${stateArtifact.id}, Size: ${stateArtifact.size_in_bytes} bytes`);
-                  core.setOutput('run_id', run.id.toString());
-                  core.setOutput('artifact_id', stateArtifact.id.toString());
-                  return;
-                } else {
-                  console.log(`   No terraform-state artifact found (checked: ${artifactNames.join(', ')})`);
+                  const runInfo = {
+                    run_id: run.id,
+                    artifact_id: stateArtifact.id,
+                    artifact_size: stateArtifact.size_in_bytes,
+                    apply_succeeded: applySucceeded,
+                    run_status: run.status,
+                    run_conclusion: run.conclusion
+                  };
+                  
+                  if (applySucceeded) {
+                    runsWithSuccessfulApply.push(runInfo);
+                    console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
+                  } else {
+                    runsWithStateArtifact.push(runInfo);
+                    console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'}`);
+                  }
                 }
               } catch (error) {
-                console.log(`Error checking artifacts for run ${run.id}: ${error.message}`);
-                // Continue searching if this run doesn't have artifacts or API call fails
+                console.log(`   Error checking run ${run.id}: ${error.message}`);
                 continue;
               }
             }
             
-            console.log('❌ No state artifact found in recent workflow runs');
+            // Prefer runs where apply succeeded
+            if (runsWithSuccessfulApply.length > 0) {
+              const bestRun = runsWithSuccessfulApply[0]; // Already sorted by most recent
+              console.log(`\n✅ Found ${runsWithSuccessfulApply.length} run(s) with successful apply and state artifact`);
+              console.log(`   Using run ${bestRun.run_id} (Apply succeeded, State size: ${bestRun.artifact_size} bytes)`);
+              core.setOutput('run_id', bestRun.run_id.toString());
+              core.setOutput('artifact_id', bestRun.artifact_id.toString());
+              return;
+            }
+            
+            // Fallback to any run with state artifact if no successful apply found
+            if (runsWithStateArtifact.length > 0) {
+              const bestRun = runsWithStateArtifact[0];
+              console.log(`\n⚠️  No runs with successful apply found, using run with state artifact`);
+              console.log(`   Using run ${bestRun.run_id} (Apply ${bestRun.apply_succeeded ? 'succeeded' : 'failed'}, State size: ${bestRun.artifact_size} bytes)`);
+              console.log(`   ⚠️  Warning: This state may be incomplete or from a failed apply`);
+              core.setOutput('run_id', bestRun.run_id.toString());
+              core.setOutput('artifact_id', bestRun.artifact_id.toString());
+              return;
+            }
+            
+            console.log('\n❌ No state artifact found in recent workflow runs');
             core.setOutput('run_id', '');
             core.setOutput('artifact_id', '');
 
@@ -655,9 +741,10 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // Find the most recent workflow run (any status) that has the terraform-state artifact
-            // State is uploaded with if: always(), so failed runs can also have updated state
+            // Find the most recent workflow run where apply succeeded and has the terraform-state artifact
+            // Prefer runs where apply succeeded, as they have the complete state
             console.log(`Searching for terraform-state artifact in workflow: terraform.yml`);
+            console.log(`Preferring runs where Terraform Apply job succeeded`);
             
             const { data: runs } = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
@@ -668,47 +755,89 @@ jobs:
             
             console.log(`Found ${runs.workflow_runs.length} workflow runs`);
             
-            // Search for the most recent run that has the terraform-state artifact
-            // Runs are already sorted by most recent first
+            // First pass: Look for runs where apply succeeded
+            const runsWithSuccessfulApply = [];
+            const runsWithStateArtifact = [];
+            
             for (const run of runs.workflow_runs) {
               // Only skip queued runs - artifacts are available even for in_progress runs
-              // (artifacts are uploaded as soon as the job completes, not when the workflow completes)
               if (run.status === 'queued') {
                 console.log(`Skipping run ${run.id} - status: ${run.status}`);
                 continue;
               }
               
               try {
-                // Check artifacts directly - this is the most reliable way
+                // Check if apply job succeeded
+                const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: run.id
+                });
+                
+                const applyJob = jobs.jobs.find(job => job.name === 'Terraform Apply');
+                const applySucceeded = applyJob && applyJob.conclusion === 'success';
+                
+                // Check artifacts
                 const { data: artifactsResponse } = await github.rest.actions.listWorkflowRunArtifacts({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   run_id: run.id
                 });
                 
-                // The API returns { artifacts: [...] }, so access artifacts.artifacts
                 const artifacts = artifactsResponse.artifacts || [];
                 const artifactNames = artifacts.map(a => a.name);
-                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch}) has ${artifacts.length} artifact(s): ${artifactNames.join(', ')}`);
-                
                 const stateArtifact = artifacts.find(a => a.name === 'terraform-state');
+                
+                console.log(`Run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
+                console.log(`   Apply job: ${applyJob ? `${applyJob.name} (${applyJob.conclusion || 'unknown'})` : 'not found'}`);
+                console.log(`   Artifacts: ${artifactNames.join(', ') || 'none'}`);
+                
                 if (stateArtifact) {
-                  console.log(`✅ Found state artifact in run ${run.id} (${run.status}, ${run.conclusion || 'unknown'}, ${run.head_branch})`);
-                  console.log(`   Artifact ID: ${stateArtifact.id}, Size: ${stateArtifact.size_in_bytes} bytes`);
-                  core.setOutput('run_id', run.id.toString());
-                  core.setOutput('artifact_id', stateArtifact.id.toString());
-                  return;
-                } else {
-                  console.log(`   No terraform-state artifact found (checked: ${artifactNames.join(', ')})`);
+                  const runInfo = {
+                    run_id: run.id,
+                    artifact_id: stateArtifact.id,
+                    artifact_size: stateArtifact.size_in_bytes,
+                    apply_succeeded: applySucceeded,
+                    run_status: run.status,
+                    run_conclusion: run.conclusion
+                  };
+                  
+                  if (applySucceeded) {
+                    runsWithSuccessfulApply.push(runInfo);
+                    console.log(`   ✅ State artifact found + Apply succeeded (preferred)`);
+                  } else {
+                    runsWithStateArtifact.push(runInfo);
+                    console.log(`   ⚠️  State artifact found but Apply ${applyJob ? `failed (${applyJob.conclusion})` : 'not found'}`);
+                  }
                 }
               } catch (error) {
-                console.log(`Error checking artifacts for run ${run.id}: ${error.message}`);
-                // Continue searching if this run doesn't have artifacts or API call fails
+                console.log(`   Error checking run ${run.id}: ${error.message}`);
                 continue;
               }
             }
             
-            console.log('❌ No state artifact found in recent workflow runs');
+            // Prefer runs where apply succeeded
+            if (runsWithSuccessfulApply.length > 0) {
+              const bestRun = runsWithSuccessfulApply[0]; // Already sorted by most recent
+              console.log(`\n✅ Found ${runsWithSuccessfulApply.length} run(s) with successful apply and state artifact`);
+              console.log(`   Using run ${bestRun.run_id} (Apply succeeded, State size: ${bestRun.artifact_size} bytes)`);
+              core.setOutput('run_id', bestRun.run_id.toString());
+              core.setOutput('artifact_id', bestRun.artifact_id.toString());
+              return;
+            }
+            
+            // Fallback to any run with state artifact if no successful apply found
+            if (runsWithStateArtifact.length > 0) {
+              const bestRun = runsWithStateArtifact[0];
+              console.log(`\n⚠️  No runs with successful apply found, using run with state artifact`);
+              console.log(`   Using run ${bestRun.run_id} (Apply ${bestRun.apply_succeeded ? 'succeeded' : 'failed'}, State size: ${bestRun.artifact_size} bytes)`);
+              console.log(`   ⚠️  Warning: This state may be incomplete or from a failed apply`);
+              core.setOutput('run_id', bestRun.run_id.toString());
+              core.setOutput('artifact_id', bestRun.artifact_id.toString());
+              return;
+            }
+            
+            console.log('\n❌ No state artifact found in recent workflow runs');
             core.setOutput('run_id', '');
             core.setOutput('artifact_id', '');
 
