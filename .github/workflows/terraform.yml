@@ -146,6 +146,11 @@ jobs:
                 const applySucceeded = applyJob && applyJob.conclusion === 'success';
                 const destroySucceeded = destroyJob && destroyJob.conclusion === 'success';
                 
+                // Debug: Log all job names to help troubleshoot
+                if (run.id === runs.workflow_runs[0].id) {
+                  console.log(`   All jobs in this run: ${jobs.jobs.map(j => `${j.name} (${j.conclusion || 'unknown'})`).join(', ')}`);
+                }
+                
                 // Check artifacts
                 const { data: artifactsResponse } = await github.rest.actions.listWorkflowRunArtifacts({
                   owner: context.repo.owner,
@@ -648,6 +653,11 @@ jobs:
                 const applySucceeded = applyJob && applyJob.conclusion === 'success';
                 const destroySucceeded = destroyJob && destroyJob.conclusion === 'success';
                 
+                // Debug: Log all job names to help troubleshoot
+                if (run.id === runs.workflow_runs[0].id) {
+                  console.log(`   All jobs in this run: ${jobs.jobs.map(j => `${j.name} (${j.conclusion || 'unknown'})`).join(', ')}`);
+                }
+                
                 // Check artifacts
                 const { data: artifactsResponse } = await github.rest.actions.listWorkflowRunArtifacts({
                   owner: context.repo.owner,
@@ -1003,6 +1013,11 @@ jobs:
                 const destroyJob = jobs.jobs.find(job => job.name === 'Terraform Destroy');
                 const applySucceeded = applyJob && applyJob.conclusion === 'success';
                 const destroySucceeded = destroyJob && destroyJob.conclusion === 'success';
+                
+                // Debug: Log all job names to help troubleshoot
+                if (run.id === runs.workflow_runs[0].id) {
+                  console.log(`   All jobs in this run: ${jobs.jobs.map(j => `${j.name} (${j.conclusion || 'unknown'})`).join(', ')}`);
+                }
                 
                 // Check artifacts
                 const { data: artifactsResponse } = await github.rest.actions.listWorkflowRunArtifacts({
