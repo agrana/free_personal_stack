@@ -204,6 +204,60 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           run_id: ${{ steps.find-state-run.outputs.run_id }}
 
+      - name: Verify State File Has Resources
+        if: github.event_name != 'pull_request' && steps.download-state.outcome == 'success'
+        run: |
+          STATE_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
+          
+          if [ ! -f "$STATE_ENC" ]; then
+            echo "⚠️  No encrypted state file found, will start with empty state"
+            exit 0
+          fi
+          
+          echo "Verifying state file has actual resources (not just data sources)..."
+          
+          # Decrypt temporarily to check content
+          TEMP_STATE="/tmp/terraform.tfstate.check"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
+            -in "$STATE_ENC" \
+            -out "$TEMP_STATE" \
+            -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}" 2>/dev/null || {
+            echo "❌ Failed to decrypt state file for verification"
+            exit 1
+          }
+          
+          # Check if it's valid JSON
+          if ! jq empty "$TEMP_STATE" 2>/dev/null; then
+            echo "❌ State file is not valid JSON"
+            rm -f "$TEMP_STATE"
+            exit 1
+          fi
+          
+          # Count actual resources (not data sources or null resources)
+          RESOURCE_COUNT=$(jq -r '[.resources[]? | select(.mode == "managed" and .type != "null_resource")] | length' "$TEMP_STATE" 2>/dev/null || echo "0")
+          DATA_COUNT=$(jq -r '[.resources[]? | select(.mode == "data")] | length' "$TEMP_STATE" 2>/dev/null || echo "0")
+          NULL_COUNT=$(jq -r '[.resources[]? | select(.type == "null_resource")] | length' "$TEMP_STATE" 2>/dev/null || echo "0")
+          
+          echo "State file contains:"
+          echo "  - Managed resources: $RESOURCE_COUNT"
+          echo "  - Data sources: $DATA_COUNT"
+          echo "  - Null resources: $NULL_COUNT"
+          
+          rm -f "$TEMP_STATE"
+          
+          if [ "$RESOURCE_COUNT" -eq "0" ]; then
+            echo "⚠️  State file has no managed resources (only data sources or null resources)"
+            echo "This state is likely from a failed or incomplete apply"
+            echo "Terraform will try to create resources that may already exist"
+            echo ""
+            echo "Consider:"
+            echo "1. Running terraform import for existing resources"
+            echo "2. Or manually verifying the state file is correct"
+            exit 0  # Don't fail, just warn - let terraform plan show what it would do
+          else
+            echo "✅ State file contains $RESOURCE_COUNT managed resource(s)"
+          fi
+
       - name: Decrypt Terraform State (if exists)
         if: github.event_name != 'pull_request' && steps.download-state.outcome == 'success'
         run: |
