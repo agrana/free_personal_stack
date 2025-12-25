@@ -35,8 +35,9 @@ jobs:
   plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
-    # No environment - plan runs automatically without approval
-    # Uses repository-level secrets (ensure secrets are configured at repository level)
+    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    # Plan runs automatically - configure environment to NOT require approval
+    # Uses environment secrets (TERRAFORM_STATE_PASSWORD must be in environment)
     # Also runs on workflow_dispatch with terraform_command: plan
     # Skip on initial commit - setup workflows need to run first
     if: |
@@ -292,16 +293,42 @@ jobs:
           BACKUP_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted"
           BACKUP_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup"
           
+          # Check if TERRAFORM_STATE_PASSWORD is available
+          if [ -z "${{ secrets.TERRAFORM_STATE_PASSWORD }}" ]; then
+            echo "❌ TERRAFORM_STATE_PASSWORD is not available"
+            echo "Please add TERRAFORM_STATE_PASSWORD to repository secrets (Settings → Secrets and variables → Actions)"
+            echo "Or configure the environment to not require approval and use environment secrets"
+            if [ -f "$STATE_ENC" ]; then
+              echo "Removing encrypted state file to prevent Terraform from reading it"
+              rm -f "$STATE_ENC" "$BACKUP_ENC"
+            fi
+            exit 1
+          fi
+          
           echo "Checking for encrypted state file at: $STATE_ENC"
           if [ -f "$STATE_ENC" ]; then
             echo "✅ Found encrypted state file, decrypting..."
-            openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
+            if openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
               -in "$STATE_ENC" \
               -out "$STATE_FILE" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "✅ State file decrypted successfully"
-            ls -lh "$STATE_FILE"
-            echo "State file size: $(wc -c < "$STATE_FILE") bytes"
+              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}" 2>&1; then
+              echo "✅ State file decrypted successfully"
+              ls -lh "$STATE_FILE"
+              echo "State file size: $(wc -c < "$STATE_FILE") bytes"
+              # Verify it's valid JSON
+              if jq empty "$STATE_FILE" 2>/dev/null; then
+                echo "✅ Decrypted state file is valid JSON"
+              else
+                echo "❌ Decrypted state file is not valid JSON - decryption may have failed"
+                exit 1
+              fi
+            else
+              echo "❌ Failed to decrypt state file"
+              echo "Password may be incorrect or file may be corrupted"
+              # Remove the encrypted file so Terraform doesn't try to read it
+              rm -f "$STATE_ENC" "$STATE_FILE"
+              exit 1
+            fi
           else
             echo "⚠️  Encrypted state file not found at $STATE_ENC"
             echo "Files in ${{ env.WORKING_DIRECTORY }}:"
@@ -310,14 +337,17 @@ jobs:
           
           if [ -f "$BACKUP_ENC" ]; then
             echo "✅ Found encrypted backup file, decrypting..."
-            openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
+            if openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
               -in "$BACKUP_ENC" \
               -out "$BACKUP_FILE" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "✅ State backup file decrypted successfully"
-            ls -lh "$BACKUP_FILE"
+              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}" 2>&1; then
+              echo "✅ State backup file decrypted successfully"
+              ls -lh "$BACKUP_FILE"
+            else
+              echo "⚠️  Failed to decrypt backup file (non-critical)"
+              rm -f "$BACKUP_ENC" "$BACKUP_FILE"
+            fi
           fi
-        continue-on-error: true
 
       - name: Verify State File Before Terraform
         if: github.event_name != 'pull_request'
