@@ -302,15 +302,18 @@ jobs:
         run: terraform apply -auto-approve -no-color tfplan
 
       - name: Encrypt Terraform State
-        if: always() && steps.apply.outcome == 'success'
+        if: always()
         run: |
-          # Encrypt state file if it exists
+          # Always encrypt state if it exists, even if apply failed
+          # Terraform may have partially modified resources before failing
           if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" ]; then
             openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
               -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" \
               -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" \
               -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
             echo "State file encrypted successfully"
+          else
+            echo "⚠️  No state file found to encrypt (apply may have failed before creating state)"
           fi
           # Encrypt backup file if it exists
           if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup" ]; then
@@ -322,7 +325,7 @@ jobs:
           fi
 
       - name: Upload Encrypted Terraform State
-        if: always() && steps.apply.outcome == 'success'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: terraform-state
@@ -416,15 +419,18 @@ jobs:
         run: terraform destroy -auto-approve -no-color
 
       - name: Encrypt Terraform State
-        if: always() && steps.destroy.outcome == 'success'
+        if: always()
         run: |
-          # Encrypt state file if it exists
+          # Always encrypt state if it exists, even if destroy failed
+          # Terraform may have partially destroyed resources before failing
           if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" ]; then
             openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
               -in "${{ env.WORKING_DIRECTORY }}/terraform.tfstate" \
               -out "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted" \
               -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
             echo "State file encrypted successfully"
+          else
+            echo "⚠️  No state file found to encrypt (destroy may have failed or completed)"
           fi
           # Encrypt backup file if it exists
           if [ -f "${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup" ]; then
@@ -436,7 +442,7 @@ jobs:
           fi
 
       - name: Upload Encrypted Terraform State
-        if: always() && steps.destroy.outcome == 'success'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: terraform-state
