@@ -109,6 +109,13 @@ jobs:
           location: artifact
           directory: ${{ env.WORKING_DIRECTORY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Debug State Download
+        if: github.event_name != 'pull_request' && steps.download-state.outcome == 'success'
+        run: |
+          echo "State download completed"
+          echo "Checking for state file..."
+          ls -lah "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate*" || echo "No state files found"
 
       - name: Verify State File Has Resources
         if: github.event_name != 'pull_request' && steps.download-state.outcome == 'success'
@@ -182,6 +189,18 @@ jobs:
 
       - name: Terraform Init
         run: terraform init
+
+      - name: Verify Terraform Can See State
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "Checking if Terraform can see state resources..."
+          if terraform state list 2>/dev/null | head -5; then
+            STATE_COUNT=$(terraform state list 2>/dev/null | wc -l)
+            echo "✅ Terraform can see $STATE_COUNT resource(s) in state"
+          else
+            echo "⚠️  Terraform state list failed or returned empty"
+            echo "This might mean state file wasn't loaded correctly"
+          fi
 
       - name: Verify State File After Init
         if: github.event_name != 'pull_request'
@@ -287,6 +306,16 @@ jobs:
             ${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup
           retention-days: 1
           if-no-files-found: ignore
+
+      - name: Upload State After Plan (for next run)
+        if: steps.plan.outcome == 'success' && github.event_name != 'pull_request'
+        uses: badgerhobbs/terraform-state@v2
+        with:
+          encryption_key: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
+          operation: upload
+          location: artifact
+          directory: ${{ env.WORKING_DIRECTORY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Plan Artifact
         if: steps.plan.outcome == 'success'
