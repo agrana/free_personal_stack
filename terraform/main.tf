@@ -113,6 +113,7 @@ output "supabase_project_url" {
   value       = module.supabase.project_url
 }
 
+
 output "supabase_api_url" {
   description = "The API URL of the Supabase project"
   value       = module.supabase.api_url
