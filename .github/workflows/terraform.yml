@@ -253,81 +253,46 @@ jobs:
             core.setOutput('run_id', '');
             core.setOutput('artifact_id', '');
 
-      - name: Download Terraform State (if exists)
-        if: github.event_name != 'pull_request' && steps.find-state-run.outcome == 'success' && steps.find-state-run.outputs.run_id != ''
-        uses: dawidd6/action-download-artifact@v3
+      - name: Download Encrypted Terraform State
+        if: github.event_name != 'pull_request'
+        uses: badgerhobbs/terraform-state@v2
         id: download-state
         continue-on-error: true
         with:
-          name: terraform-state
-          path: ${{ env.WORKING_DIRECTORY }}/
+          encryption_key: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
+          operation: download
+          location: artifact
+          directory: ${{ env.WORKING_DIRECTORY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          run_id: ${{ steps.find-state-run.outputs.run_id }}
-      
-      - name: Log State Download Info
-        if: github.event_name != 'pull_request' && steps.find-state-run.outcome == 'success'
-        run: |
-          echo "📥 State download information:"
-          echo "   Run ID: ${{ steps.find-state-run.outputs.run_id }}"
-          echo "   Artifact ID: ${{ steps.find-state-run.outputs.artifact_id }}"
-          echo "   Download outcome: ${{ steps.download-state.outcome }}"
-          if [ "${{ steps.download-state.outcome }}" == "success" ]; then
-            echo "   ✅ State artifact downloaded successfully"
-            echo "   Checking downloaded files:"
-            ls -lah "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" || echo "Directory not found"
-          else
-            echo "   ⚠️  State artifact download failed or skipped"
-          fi
 
       - name: Verify State File Has Resources
         if: github.event_name != 'pull_request' && steps.download-state.outcome == 'success'
         continue-on-error: true
         run: |
-          STATE_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
+          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
           
-          if [ ! -f "$STATE_ENC" ]; then
-            echo "⚠️  No encrypted state file found, will start with empty state"
-            exit 0
-          fi
-          
-          # Check if TERRAFORM_STATE_PASSWORD is available
-          if [ -z "${{ secrets.TERRAFORM_STATE_PASSWORD }}" ]; then
-            echo "⚠️  TERRAFORM_STATE_PASSWORD not available - skipping verification"
-            echo "State file will be decrypted in the next step if password is available"
+          if [ ! -f "$STATE_FILE" ]; then
+            echo "⚠️  No state file found, will start with empty state"
             exit 0
           fi
           
           echo "Verifying state file has actual resources (not just data sources)..."
           
-          # Decrypt temporarily to check content
-          TEMP_STATE="/tmp/terraform.tfstate.check"
-          if ! openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
-            -in "$STATE_ENC" \
-            -out "$TEMP_STATE" \
-            -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}" 2>/dev/null; then
-            echo "⚠️  Failed to decrypt state file for verification (password may be incorrect or file corrupted)"
-            echo "This is non-blocking - state will be decrypted in the next step"
-            exit 0
-          fi
-          
           # Check if it's valid JSON
-          if ! jq empty "$TEMP_STATE" 2>/dev/null; then
+          if ! jq empty "$STATE_FILE" 2>/dev/null; then
             echo "❌ State file is not valid JSON"
-            rm -f "$TEMP_STATE"
             exit 1
           fi
           
           # Count actual resources (not data sources or null resources)
-          RESOURCE_COUNT=$(jq -r '[.resources[]? | select(.mode == "managed" and .type != "null_resource")] | length' "$TEMP_STATE" 2>/dev/null || echo "0")
-          DATA_COUNT=$(jq -r '[.resources[]? | select(.mode == "data")] | length' "$TEMP_STATE" 2>/dev/null || echo "0")
-          NULL_COUNT=$(jq -r '[.resources[]? | select(.type == "null_resource")] | length' "$TEMP_STATE" 2>/dev/null || echo "0")
+          RESOURCE_COUNT=$(jq -r '[.resources[]? | select(.mode == "managed" and .type != "null_resource")] | length' "$STATE_FILE" 2>/dev/null || echo "0")
+          DATA_COUNT=$(jq -r '[.resources[]? | select(.mode == "data")] | length' "$STATE_FILE" 2>/dev/null || echo "0")
+          NULL_COUNT=$(jq -r '[.resources[]? | select(.type == "null_resource")] | length' "$STATE_FILE" 2>/dev/null || echo "0")
           
           echo "State file contains:"
           echo "  - Managed resources: $RESOURCE_COUNT"
           echo "  - Data sources: $DATA_COUNT"
           echo "  - Null resources: $NULL_COUNT"
-          
-          rm -f "$TEMP_STATE"
           
           if [ "$RESOURCE_COUNT" -eq "0" ]; then
             echo "⚠️  State file has no managed resources (only data sources or null resources)"
@@ -340,71 +305,6 @@ jobs:
             exit 0  # Don't fail, just warn - let terraform plan show what it would do
           else
             echo "✅ State file contains $RESOURCE_COUNT managed resource(s)"
-          fi
-
-      - name: Decrypt Terraform State (if exists)
-        if: github.event_name != 'pull_request' && steps.download-state.outcome == 'success'
-        run: |
-          # Use absolute paths since we're running from workspace root
-          STATE_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
-          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
-          BACKUP_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted"
-          BACKUP_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup"
-          
-          # Check if TERRAFORM_STATE_PASSWORD is available
-          if [ -z "${{ secrets.TERRAFORM_STATE_PASSWORD }}" ]; then
-            echo "❌ TERRAFORM_STATE_PASSWORD is not available"
-            echo "Please add TERRAFORM_STATE_PASSWORD to repository secrets (Settings → Secrets and variables → Actions)"
-            echo "Or configure the environment to not require approval and use environment secrets"
-            if [ -f "$STATE_ENC" ]; then
-              echo "Removing encrypted state file to prevent Terraform from reading it"
-              rm -f "$STATE_ENC" "$BACKUP_ENC"
-            fi
-            exit 1
-          fi
-          
-          echo "Checking for encrypted state file at: $STATE_ENC"
-          if [ -f "$STATE_ENC" ]; then
-            echo "✅ Found encrypted state file, decrypting..."
-            if openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "$STATE_ENC" \
-              -out "$STATE_FILE" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}" 2>&1; then
-              echo "✅ State file decrypted successfully"
-              ls -lh "$STATE_FILE"
-              echo "State file size: $(wc -c < "$STATE_FILE") bytes"
-              # Verify it's valid JSON
-              if jq empty "$STATE_FILE" 2>/dev/null; then
-                echo "✅ Decrypted state file is valid JSON"
-              else
-                echo "❌ Decrypted state file is not valid JSON - decryption may have failed"
-                exit 1
-              fi
-            else
-              echo "❌ Failed to decrypt state file"
-              echo "Password may be incorrect or file may be corrupted"
-              # Remove the encrypted file so Terraform doesn't try to read it
-              rm -f "$STATE_ENC" "$STATE_FILE"
-              exit 1
-            fi
-          else
-            echo "⚠️  Encrypted state file not found at $STATE_ENC"
-            echo "Files in ${{ env.WORKING_DIRECTORY }}:"
-            ls -la "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" || echo "Directory not found"
-          fi
-          
-          if [ -f "$BACKUP_ENC" ]; then
-            echo "✅ Found encrypted backup file, decrypting..."
-            if openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "$BACKUP_ENC" \
-              -out "$BACKUP_FILE" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}" 2>&1; then
-              echo "✅ State backup file decrypted successfully"
-              ls -lh "$BACKUP_FILE"
-            else
-              echo "⚠️  Failed to decrypt backup file (non-critical)"
-              rm -f "$BACKUP_ENC" "$BACKUP_FILE"
-            fi
           fi
 
       - name: Verify State File Before Terraform
@@ -797,55 +697,17 @@ jobs:
             core.setOutput('run_id', '');
             core.setOutput('artifact_id', '');
 
-      - name: Download Terraform State (if exists and not from plan)
-        if: github.event_name != 'pull_request' && steps.download-plan-state.outcome != 'success' && steps.find-state-run.outcome == 'success' && steps.find-state-run.outputs.run_id != ''
-        uses: dawidd6/action-download-artifact@v3
+      - name: Download Encrypted Terraform State (if not from plan)
+        if: github.event_name != 'pull_request' && steps.download-plan-state.outcome != 'success'
+        uses: badgerhobbs/terraform-state@v2
         id: download-state
         continue-on-error: true
         with:
-          name: terraform-state
-          path: ${{ env.WORKING_DIRECTORY }}/
+          encryption_key: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
+          operation: download
+          location: artifact
+          directory: ${{ env.WORKING_DIRECTORY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          run_id: ${{ steps.find-state-run.outputs.run_id }}
-
-      - name: Decrypt Terraform State (if exists)
-        if: github.event_name != 'pull_request' && (steps.download-plan-state.outcome == 'success' || steps.download-state.outcome == 'success')
-        run: |
-          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
-          BACKUP_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup"
-          STATE_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
-          BACKUP_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted"
-          
-          # If we got state from plan job, it's already decrypted
-          if [ -f "$STATE_FILE" ] && [ ! -f "$STATE_ENC" ]; then
-            echo "✅ Using state file from plan job (already decrypted)"
-            ls -lh "$STATE_FILE"
-            if [ -f "$BACKUP_FILE" ]; then
-              echo "✅ Using backup file from plan job"
-              ls -lh "$BACKUP_FILE"
-            fi
-            exit 0
-          fi
-          
-          # Otherwise, decrypt the encrypted state
-          echo "Decrypting state file from artifact..."
-          if [ -f "$STATE_ENC" ]; then
-            openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "$STATE_ENC" \
-              -out "$STATE_FILE" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "✅ State file decrypted successfully"
-            ls -lh "$STATE_FILE"
-          fi
-          if [ -f "$BACKUP_ENC" ]; then
-            openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "$BACKUP_ENC" \
-              -out "$BACKUP_FILE" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "✅ State backup file decrypted successfully"
-            ls -lh "$BACKUP_FILE"
-          fi
-        continue-on-error: true
 
       - name: Download Plan Artifact
         uses: actions/download-artifact@v4
@@ -895,76 +757,15 @@ jobs:
         id: apply
         run: terraform apply -auto-approve -no-color tfplan
 
-      - name: Encrypt Terraform State
+      - name: Encrypt and Upload Terraform State
         if: always()
-        run: |
-          # Always encrypt state if it exists, even if apply failed
-          # Terraform may have partially modified resources before failing
-          # Use absolute paths since we're running from working-directory
-          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
-          STATE_ENCRYPTED="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
-          BACKUP_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup"
-          BACKUP_ENCRYPTED="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted"
-          
-          echo "Checking for state file at: $STATE_FILE"
-          if [ -f "$STATE_FILE" ]; then
-            openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "$STATE_FILE" \
-              -out "$STATE_ENCRYPTED" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "✅ State file encrypted successfully"
-            ls -lh "$STATE_ENCRYPTED"
-          else
-            echo "⚠️  No state file found at $STATE_FILE"
-            echo "Searching for state files in working directory:"
-            find "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" -name "*.tfstate*" 2>/dev/null || true
-          fi
-          # Encrypt backup file if it exists
-          if [ -f "$BACKUP_FILE" ]; then
-            openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "$BACKUP_FILE" \
-              -out "$BACKUP_ENCRYPTED" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "✅ State backup file encrypted successfully"
-            ls -lh "$BACKUP_ENCRYPTED"
-          fi
-
-      - name: Verify Encrypted State Files Before Upload
-        if: always()
-        run: |
-          STATE_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
-          BACKUP_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted"
-          
-          echo "Checking for encrypted state files:"
-          echo "State encrypted: $STATE_ENC"
-          if [ -f "$STATE_ENC" ]; then
-            echo "✅ State encrypted file exists: $(ls -lh "$STATE_ENC")"
-          else
-            echo "⚠️  State encrypted file NOT found at $STATE_ENC"
-          fi
-          
-          echo "Backup encrypted: $BACKUP_ENC"
-          if [ -f "$BACKUP_ENC" ]; then
-            echo "✅ Backup encrypted file exists: $(ls -lh "$BACKUP_ENC")"
-          else
-            echo "ℹ️  Backup encrypted file not found (this is OK if no backup exists)"
-          fi
-          
-          echo ""
-          echo "All files in working directory:"
-          ls -lah "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" || echo "Directory not found"
-
-      - name: Upload Encrypted Terraform State
-        if: always()
-        uses: actions/upload-artifact@v4
+        uses: badgerhobbs/terraform-state@v2
         with:
-          name: terraform-state
-          path: |
-            ${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted
-            ${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted
-          retention-days: 90
-          if-no-files-found: ignore
-          overwrite: true
+          encryption_key: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
+          operation: upload
+          location: artifact
+          directory: ${{ env.WORKING_DIRECTORY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
   destroy:
     name: Terraform Destroy
@@ -1163,52 +964,16 @@ jobs:
             core.setOutput('run_id', '');
             core.setOutput('artifact_id', '');
 
-      - name: Download Terraform State (if exists)
-        if: steps.find-state-run.outcome == 'success' && steps.find-state-run.outputs.run_id != ''
-        uses: dawidd6/action-download-artifact@v3
+      - name: Download Encrypted Terraform State
+        uses: badgerhobbs/terraform-state@v2
         id: download-state
         continue-on-error: true
         with:
-          name: terraform-state
-          path: ${{ env.WORKING_DIRECTORY }}/
+          encryption_key: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
+          operation: download
+          location: artifact
+          directory: ${{ env.WORKING_DIRECTORY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          run_id: ${{ steps.find-state-run.outputs.run_id }}
-
-      - name: Decrypt Terraform State (if exists)
-        if: steps.download-state.outcome == 'success'
-        run: |
-          # Use absolute paths since we're running from workspace root
-          STATE_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
-          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
-          BACKUP_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted"
-          BACKUP_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup"
-          
-          echo "Checking for encrypted state file at: $STATE_ENC"
-          if [ -f "$STATE_ENC" ]; then
-            echo "✅ Found encrypted state file, decrypting..."
-            openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "$STATE_ENC" \
-              -out "$STATE_FILE" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "✅ State file decrypted successfully"
-            ls -lh "$STATE_FILE"
-            echo "State file size: $(wc -c < "$STATE_FILE") bytes"
-          else
-            echo "⚠️  Encrypted state file not found at $STATE_ENC"
-            echo "Files in ${{ env.WORKING_DIRECTORY }}:"
-            ls -la "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" || echo "Directory not found"
-          fi
-          
-          if [ -f "$BACKUP_ENC" ]; then
-            echo "✅ Found encrypted backup file, decrypting..."
-            openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "$BACKUP_ENC" \
-              -out "$BACKUP_FILE" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "✅ State backup file decrypted successfully"
-            ls -lh "$BACKUP_FILE"
-          fi
-        continue-on-error: true
 
       - name: Verify State File Before Destroy
         run: |
@@ -1251,73 +1016,12 @@ jobs:
         id: destroy
         run: terraform destroy -auto-approve -no-color
 
-      - name: Encrypt Terraform State
+      - name: Encrypt and Upload Terraform State
         if: always()
-        run: |
-          # Always encrypt state if it exists, even if destroy failed
-          # Terraform may have partially destroyed resources before failing
-          # Use absolute paths since we're running from working-directory
-          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
-          STATE_ENCRYPTED="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
-          BACKUP_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup"
-          BACKUP_ENCRYPTED="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted"
-          
-          echo "Checking for state file at: $STATE_FILE"
-          if [ -f "$STATE_FILE" ]; then
-            openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "$STATE_FILE" \
-              -out "$STATE_ENCRYPTED" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "✅ State file encrypted successfully"
-            ls -lh "$STATE_ENCRYPTED"
-          else
-            echo "⚠️  No state file found at $STATE_FILE"
-            echo "Searching for state files in working directory:"
-            find "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" -name "*.tfstate*" 2>/dev/null || true
-          fi
-          # Encrypt backup file if it exists
-          if [ -f "$BACKUP_FILE" ]; then
-            openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
-              -in "$BACKUP_FILE" \
-              -out "$BACKUP_ENCRYPTED" \
-              -pass pass:"${{ secrets.TERRAFORM_STATE_PASSWORD }}"
-            echo "✅ State backup file encrypted successfully"
-            ls -lh "$BACKUP_ENCRYPTED"
-          fi
-
-      - name: Verify Encrypted State Files Before Upload
-        if: always()
-        run: |
-          STATE_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted"
-          BACKUP_ENC="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted"
-          
-          echo "Checking for encrypted state files:"
-          echo "State encrypted: $STATE_ENC"
-          if [ -f "$STATE_ENC" ]; then
-            echo "✅ State encrypted file exists: $(ls -lh "$STATE_ENC")"
-          else
-            echo "⚠️  State encrypted file NOT found at $STATE_ENC"
-          fi
-          
-          echo "Backup encrypted: $BACKUP_ENC"
-          if [ -f "$BACKUP_ENC" ]; then
-            echo "✅ Backup encrypted file exists: $(ls -lh "$BACKUP_ENC")"
-          else
-            echo "ℹ️  Backup encrypted file not found (this is OK if no backup exists)"
-          fi
-          
-          echo ""
-          echo "All files in working directory:"
-          ls -lah "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" || echo "Directory not found"
-
-      - name: Upload Encrypted Terraform State
-        if: always()
-        uses: actions/upload-artifact@v4
+        uses: badgerhobbs/terraform-state@v2
         with:
-          name: terraform-state
-          path: |
-            ${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.encrypted
-            ${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate.backup.encrypted
-          retention-days: 90
-          if-no-files-found: ignore
-          overwrite: true
+          encryption_key: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
+          operation: upload
+          location: artifact
+          directory: ${{ env.WORKING_DIRECTORY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
