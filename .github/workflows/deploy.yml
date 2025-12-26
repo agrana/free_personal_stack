@@ -100,97 +100,27 @@ jobs:
           echo "   - Verify SUPABASE_PROJECT_ID matches your project's Reference ID"
           exit 1
       
-      - name: Install expect for non-interactive password input
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y expect
-
       - name: Run database migrations
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DATABASE_PASSWORD: ${{ secrets.SUPABASE_DATABASE_PASSWORD }}
-          PGPASSWORD: ${{ secrets.SUPABASE_DATABASE_PASSWORD }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DATABASE_PASSWORD }}
         run: |
           echo "🚀 Pushing database migrations..."
-          # Use expect to provide password non-interactively when prompted
-          # PGPASSWORD might also work for some PostgreSQL tools
-          expect <<'EXPECT_SCRIPT'
-            set timeout 120
-            spawn npx supabase db push
-            expect {
-              "Enter your database password:" {
-                send "$env(SUPABASE_DATABASE_PASSWORD)\r"
-                exp_continue
-              }
-              "Forgot your password?" {
-                send "$env(SUPABASE_DATABASE_PASSWORD)\r"
-                exp_continue
-              }
-              "Connecting to remote database..." {
-                exp_continue
-              }
-              "Applying migration" {
-                exp_continue
-              }
-              "Migration applied successfully" {
-                exp_continue
-              }
-              "Finished" {
-                exp_continue
-              }
-              "✅" {
-                exp_continue
-              }
-              "error" {
-                puts "Error detected in output"
-                exp_continue
-              }
-              eof {
-                catch wait result
-                set exit_code [lindex $result 3]
-                exit $exit_code
-              }
-              timeout {
-                puts "Timeout waiting for command (120s)"
-                exit 1
-              }
-            }
-          EXPECT_SCRIPT
-          MIGRATION_EXIT=$?
-          if [ $MIGRATION_EXIT -eq 0 ]; then
+          # SUPABASE_DB_PASSWORD env var is automatically used by Supabase CLI
+          # This avoids password prompts in CI/CD environments
+          if npx supabase db push; then
             echo "✅ Migrations applied successfully"
           else
-            echo "❌ Migration push failed with exit code $MIGRATION_EXIT"
+            echo "❌ Migration push failed"
+            echo "Checking migration status..."
+            npx supabase migration list || true
             exit 1
           fi
 
       - name: Verify migrations applied
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DATABASE_PASSWORD: ${{ secrets.SUPABASE_DATABASE_PASSWORD }}
-          PGPASSWORD: ${{ secrets.SUPABASE_DATABASE_PASSWORD }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DATABASE_PASSWORD }}
         run: |
           echo "🔍 Verifying migrations..."
-          expect <<'EXPECT_SCRIPT' || echo "⚠️  Could not list migrations (this is not critical)"
-            set timeout 30
-            spawn npx supabase migration list
-            expect {
-              "Enter your database password:" {
-                send "$env(SUPABASE_DATABASE_PASSWORD)\r"
-                exp_continue
-              }
-              "Forgot your password?" {
-                send "$env(SUPABASE_DATABASE_PASSWORD)\r"
-                exp_continue
-              }
-              eof {
-                catch wait result
-                set exit_code [lindex $result 3]
-                exit $exit_code
-              }
-              timeout {
-                puts "Timeout"
-                exit 1
-              }
-            }
-          EXPECT_SCRIPT
+          npx supabase migration list || echo "⚠️  Could not list migrations (this is not critical)"
