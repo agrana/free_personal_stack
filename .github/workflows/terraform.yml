@@ -241,16 +241,6 @@ jobs:
           retention-days: 1
           if-no-files-found: ignore
 
-      - name: Upload State After Plan
-        if: steps.plan.outcome == 'success' && github.event_name != 'pull_request'
-        uses: badgerhobbs/terraform-state@v2
-        continue-on-error: true
-        with:
-          encryption_key: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
-          operation: upload
-          location: artifact
-          directory: ${{ env.WORKING_DIRECTORY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Plan Artifact
         if: steps.plan.outcome == 'success'
@@ -412,8 +402,21 @@ jobs:
         id: apply
         run: terraform apply -auto-approve -no-color tfplan
 
+      - name: Check if State File Exists Before Upload
+        if: always() && github.event_name != 'pull_request'
+        id: check-state-apply
+        run: |
+          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
+          if [ -f "$STATE_FILE" ]; then
+            echo "✅ State file exists, will upload"
+            echo "state_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️  State file does not exist, skipping upload"
+            echo "state_exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Encrypt and Upload Terraform State
-        if: always()
+        if: always() && github.event_name != 'pull_request' && steps.check-state-apply.outputs.state_exists == 'true'
         uses: badgerhobbs/terraform-state@v2
         with:
           encryption_key: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
@@ -517,8 +520,21 @@ jobs:
         id: destroy
         run: terraform destroy -auto-approve -no-color
 
+      - name: Check if State File Exists Before Upload
+        if: always() && github.event_name != 'pull_request'
+        id: check-state-destroy
+        run: |
+          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
+          if [ -f "$STATE_FILE" ]; then
+            echo "✅ State file exists, will upload"
+            echo "state_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️  State file does not exist, skipping upload"
+            echo "state_exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Encrypt and Upload Terraform State
-        if: always()
+        if: always() && github.event_name != 'pull_request' && steps.check-state-destroy.outputs.state_exists == 'true'
         uses: badgerhobbs/terraform-state@v2
         with:
           encryption_key: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
