@@ -109,65 +109,18 @@ jobs:
           location: artifact
           directory: ${{ env.WORKING_DIRECTORY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify State File Has Resources
-        if: github.event_name != 'pull_request' && steps.download-state.outcome == 'success'
-        continue-on-error: true
-        run: |
-          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
-          
-          if [ ! -f "$STATE_FILE" ]; then
-            echo "⚠️  No state file found, will start with empty state"
-            exit 0
-          fi
-          
-          echo "Verifying state file has actual resources (not just data sources)..."
-          
-          # Check if it's valid JSON
-          if ! jq empty "$STATE_FILE" 2>/dev/null; then
-            echo "❌ State file is not valid JSON"
-            exit 1
-          fi
-          
-          # Count actual resources (not data sources or null resources)
-          RESOURCE_COUNT=$(jq -r '[.resources[]? | select(.mode == "managed" and .type != "null_resource")] | length' "$STATE_FILE" 2>/dev/null || echo "0")
-          DATA_COUNT=$(jq -r '[.resources[]? | select(.mode == "data")] | length' "$STATE_FILE" 2>/dev/null || echo "0")
-          NULL_COUNT=$(jq -r '[.resources[]? | select(.type == "null_resource")] | length' "$STATE_FILE" 2>/dev/null || echo "0")
-          
-          echo "State file contains:"
-          echo "  - Managed resources: $RESOURCE_COUNT"
-          echo "  - Data sources: $DATA_COUNT"
-          echo "  - Null resources: $NULL_COUNT"
-          
-          if [ "$RESOURCE_COUNT" -eq "0" ]; then
-            echo "⚠️  State file has no managed resources (only data sources or null resources)"
-            echo "This state is likely from a failed or incomplete apply"
-            echo "Terraform will try to create resources that may already exist"
-            echo ""
-            echo "Consider:"
-            echo "1. Running terraform import for existing resources"
-            echo "2. Or manually verifying the state file is correct"
-            exit 0  # Don't fail, just warn - let terraform plan show what it would do
-          else
-            echo "✅ State file contains $RESOURCE_COUNT managed resource(s)"
-          fi
-
-      - name: Verify State File Before Terraform
+      
+      - name: Verify State Downloaded
         if: github.event_name != 'pull_request'
         run: |
           STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
-          echo "Verifying state file before Terraform runs:"
           if [ -f "$STATE_FILE" ]; then
-            echo "✅ State file exists at: $STATE_FILE"
-            ls -lh "$STATE_FILE"
+            echo "✅ State file downloaded successfully"
             echo "State file size: $(wc -c < "$STATE_FILE") bytes"
-            echo "First few lines of state file (to verify it's valid JSON):"
-            head -5 "$STATE_FILE" || echo "Could not read state file"
+            echo "State file exists before terraform init - this is correct!"
           else
-            echo "⚠️  No state file found at $STATE_FILE"
-            echo "Terraform will start with empty state (this is normal for first run)"
-            echo "Files in ${{ env.WORKING_DIRECTORY }}:"
-            ls -la "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" || echo "Directory not found"
+            echo "⚠️  No state file found (this is OK for first run)"
+            echo "Terraform will start with empty state"
           fi
 
       - name: Setup Terraform
@@ -182,18 +135,6 @@ jobs:
 
       - name: Terraform Init
         run: terraform init
-
-      - name: Verify Terraform Can See State
-        if: github.event_name != 'pull_request'
-        run: |
-          echo "Checking if Terraform can see state resources..."
-          if terraform state list 2>/dev/null | head -5; then
-            STATE_COUNT=$(terraform state list 2>/dev/null | wc -l)
-            echo "✅ Terraform can see $STATE_COUNT resource(s) in state"
-          else
-            echo "⚠️  Terraform state list failed or returned empty"
-            echo "This might mean state file wasn't loaded correctly"
-          fi
 
       - name: Verify State File After Init
         if: github.event_name != 'pull_request'
