@@ -51,7 +51,7 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_DATABASE_PASSWORD: ${{ secrets.SUPABASE_DATABASE_PASSWORD }}
         run: |
           echo "🔗 Linking to Supabase project: $SUPABASE_PROJECT_ID"
           echo "📝 Verifying secrets are set..."
@@ -63,17 +63,17 @@ jobs:
             echo "❌ SUPABASE_PROJECT_ID is not set"
             exit 1
           fi
-          if [ -z "$SUPABASE_DB_PASSWORD" ]; then
-            echo "❌ SUPABASE_DB_PASSWORD is not set"
+          if [ -z "$SUPABASE_DATABASE_PASSWORD" ]; then
+            echo "❌ SUPABASE_DATABASE_PASSWORD is not set"
             exit 1
           fi
           echo "✅ All secrets are set"
-          echo "🔐 Password length: ${#SUPABASE_DB_PASSWORD} characters"
+          echo "🔐 Password length: ${#SUPABASE_DATABASE_PASSWORD} characters"
           
           # Retry linking in case of temporary connection issues
           for i in 1 2 3; do
             echo "🔄 Link attempt $i of 3..."
-            if npx supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD" 2>&1; then
+            if npx supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DATABASE_PASSWORD" 2>&1; then
               echo "✅ Successfully linked to Supabase project"
               # Verify link by checking if .temp directory was created
               if [ -f "supabase/.temp/project-ref" ]; then
@@ -94,7 +94,7 @@ jobs:
           done
           echo "❌ Failed to link after 3 attempts"
           echo "💡 Troubleshooting tips:"
-          echo "   - Verify SUPABASE_DB_PASSWORD is correct in GitHub Secrets"
+          echo "   - Verify SUPABASE_DATABASE_PASSWORD is correct in GitHub Secrets"
           echo "   - Check that the password matches the one in Supabase Dashboard → Settings → Database"
           echo "   - Ensure SUPABASE_ACCESS_TOKEN is a personal access token (not service role key)"
           echo "   - Verify SUPABASE_PROJECT_ID matches your project's Reference ID"
