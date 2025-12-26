@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, lazy, Suspense } from 'react';
+import { useEffect, useState, lazy, Suspense, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/app/lib/supabase';
 import ConfigurationCheck from './ConfigurationCheck';
@@ -39,13 +39,17 @@ export default function VerificationDashboard() {
   const [configError, setConfigError] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
 
-  // Check authentication on mount
+  // Check authentication on mount (only once)
   useEffect(() => {
+    let mounted = true;
+    
     const checkAuth = async () => {
       const supabase = createClient();
       const {
         data: { session },
       } = await supabase.auth.getSession();
+      
+      if (!mounted) return;
       
       if (!session) {
         router.push('/auth/signin');
@@ -56,7 +60,11 @@ export default function VerificationDashboard() {
     };
 
     checkAuth();
-  }, [router]);
+    
+    return () => {
+      mounted = false;
+    };
+  }, []); // Empty deps - only run once on mount
 
   const allSuccess = Object.values(statuses).every(
     (status) => status === 'success'
@@ -200,30 +208,30 @@ export default function VerificationDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Suspense fallback={<VerificationSkeleton />}>
           <DomainVerification
-            onStatusChange={(status) =>
-              setStatuses((prev) => ({ ...prev, domain: status }))
-            }
+            onStatusChange={useCallback((status: 'checking' | 'success' | 'error') => {
+              setStatuses((prev) => ({ ...prev, domain: status }));
+            }, [])}
           />
         </Suspense>
         <Suspense fallback={<VerificationSkeleton />}>
           <AuthVerification
-            onStatusChange={(status) =>
-              setStatuses((prev) => ({ ...prev, auth: status }))
-            }
+            onStatusChange={useCallback((status: 'checking' | 'success' | 'error') => {
+              setStatuses((prev) => ({ ...prev, auth: status }));
+            }, [])}
           />
         </Suspense>
         <Suspense fallback={<VerificationSkeleton />}>
           <DatabaseVerification
-            onStatusChange={(status) =>
-              setStatuses((prev) => ({ ...prev, database: status }))
-            }
+            onStatusChange={useCallback((status: 'checking' | 'success' | 'error') => {
+              setStatuses((prev) => ({ ...prev, database: status }));
+            }, [])}
           />
         </Suspense>
         <Suspense fallback={<VerificationSkeleton />}>
           <EmailRoutingVerification
-            onStatusChange={(status) =>
-              setStatuses((prev) => ({ ...prev, email: status }))
-            }
+            onStatusChange={useCallback((status: 'checking' | 'success' | 'error') => {
+              setStatuses((prev) => ({ ...prev, email: status }));
+            }, [])}
           />
         </Suspense>
       </div>
