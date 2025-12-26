@@ -8,7 +8,7 @@ locals {
 
   # Infer vercel_project_name from domain_name if not provided
   # Remove dots, replace with hyphens, lowercase
-  sanitized_domain = replace(replace(lower(var.domain_name), ".", "-"), "_", "-")
+  sanitized_domain    = replace(replace(lower(var.domain_name), ".", "-"), "_", "-")
   vercel_project_name = var.vercel_project_name != "" ? var.vercel_project_name : local.sanitized_domain
 
   # Infer app_url from vercel_project_name if not provided
