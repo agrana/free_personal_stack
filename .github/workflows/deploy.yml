@@ -35,27 +35,63 @@ jobs:
         with:
           version: ${{ env.SUPABASE_VERSION }}
 
+      - name: Verify migrations directory exists
+        run: |
+          if [ ! -d "supabase/migrations" ]; then
+            echo "❌ Error: supabase/migrations directory not found"
+            exit 1
+          fi
+          MIGRATION_COUNT=$(find supabase/migrations -name "*.sql" | wc -l)
+          echo "✅ Found $MIGRATION_COUNT migration file(s)"
+          if [ "$MIGRATION_COUNT" -eq 0 ]; then
+            echo "⚠️  Warning: No migration files found in supabase/migrations/"
+          fi
+
       - name: Link Supabase project
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
+          echo "🔗 Linking to Supabase project: $SUPABASE_PROJECT_ID"
           # Retry linking in case of temporary connection issues
           for i in 1 2 3; do
             if npx supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"; then
-              exit 0
+              echo "✅ Successfully linked to Supabase project"
+              # Verify link by checking project status
+              if npx supabase projects list 2>/dev/null | grep -q "$SUPABASE_PROJECT_ID"; then
+                echo "✅ Link verification successful"
+                exit 0
+              else
+                echo "⚠️  Link completed but verification failed, continuing anyway..."
+                exit 0
+              fi
             fi
             if [ $i -lt 3 ]; then
-              echo "Link attempt $i failed, retrying in 5 seconds..."
+              echo "❌ Link attempt $i failed, retrying in 5 seconds..."
               sleep 5
             fi
           done
-          echo "Failed to link after 3 attempts"
+          echo "❌ Failed to link after 3 attempts"
           exit 1
       
       - name: Run database migrations
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          npx supabase db push
+          echo "🚀 Pushing database migrations..."
+          if npx supabase db push; then
+            echo "✅ Migrations applied successfully"
+          else
+            echo "❌ Migration push failed"
+            echo "Checking migration status..."
+            npx supabase migration list || true
+            exit 1
+          fi
+
+      - name: Verify migrations applied
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          echo "🔍 Verifying migrations..."
+          npx supabase migration list || echo "⚠️  Could not list migrations (this is not critical)"
