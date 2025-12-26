@@ -129,9 +129,15 @@ This document verifies the complete setup flow for someone using this template.
 - Template setup workflow creates issue
 - Setup workflow validates secrets
 - Terraform workflow skips initial commit
-- Supabase workflow validates secrets
+- Terraform workflow validates secrets before running
+- Supabase workflow validates secrets before running
+- Both workflows fail gracefully with clear error messages
+- Flow documentation created
 
-⚠️ **Needs Verification:**
-- Terraform workflow should validate secrets before running (currently relies on environment)
-- Flow documentation clarity
+✅ **Verified Flow:**
+1. Initial commit → Setup workflows run → Issue created
+2. User adds secrets → Validation passes
+3. User runs Terraform → Infrastructure created
+4. User runs Supabase migrations → Schema deployed
+5. App auto-deploys → Verification dashboard works
 
