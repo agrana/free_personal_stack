@@ -39,6 +39,23 @@ export default function VerificationDashboard() {
   const [configError, setConfigError] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
 
+  // Memoize callbacks before any early returns (React hooks rule)
+  const handleDomainStatusChange = useCallback((status: 'checking' | 'success' | 'error') => {
+    setStatuses((prev) => ({ ...prev, domain: status }));
+  }, []);
+
+  const handleAuthStatusChange = useCallback((status: 'checking' | 'success' | 'error') => {
+    setStatuses((prev) => ({ ...prev, auth: status }));
+  }, []);
+
+  const handleDatabaseStatusChange = useCallback((status: 'checking' | 'success' | 'error') => {
+    setStatuses((prev) => ({ ...prev, database: status }));
+  }, []);
+
+  const handleEmailStatusChange = useCallback((status: 'checking' | 'success' | 'error') => {
+    setStatuses((prev) => ({ ...prev, email: status }));
+  }, []);
+
   // Check authentication on mount (only once)
   useEffect(() => {
     let mounted = true;
@@ -64,7 +81,7 @@ export default function VerificationDashboard() {
     return () => {
       mounted = false;
     };
-  }, []); // Empty deps - only run once on mount
+  }, [router]); // Include router in deps
 
   const allSuccess = Object.values(statuses).every(
     (status) => status === 'success'
@@ -207,32 +224,16 @@ export default function VerificationDashboard() {
       {/* Verification Components */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Suspense fallback={<VerificationSkeleton />}>
-          <DomainVerification
-            onStatusChange={useCallback((status: 'checking' | 'success' | 'error') => {
-              setStatuses((prev) => ({ ...prev, domain: status }));
-            }, [])}
-          />
+          <DomainVerification onStatusChange={handleDomainStatusChange} />
         </Suspense>
         <Suspense fallback={<VerificationSkeleton />}>
-          <AuthVerification
-            onStatusChange={useCallback((status: 'checking' | 'success' | 'error') => {
-              setStatuses((prev) => ({ ...prev, auth: status }));
-            }, [])}
-          />
+          <AuthVerification onStatusChange={handleAuthStatusChange} />
         </Suspense>
         <Suspense fallback={<VerificationSkeleton />}>
-          <DatabaseVerification
-            onStatusChange={useCallback((status: 'checking' | 'success' | 'error') => {
-              setStatuses((prev) => ({ ...prev, database: status }));
-            }, [])}
-          />
+          <DatabaseVerification onStatusChange={handleDatabaseStatusChange} />
         </Suspense>
         <Suspense fallback={<VerificationSkeleton />}>
-          <EmailRoutingVerification
-            onStatusChange={useCallback((status: 'checking' | 'success' | 'error') => {
-              setStatuses((prev) => ({ ...prev, email: status }));
-            }, [])}
-          />
+          <EmailRoutingVerification onStatusChange={handleEmailStatusChange} />
         </Suspense>
       </div>
 
