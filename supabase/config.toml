@@ -113,10 +113,11 @@ auth_token = "env(SUPABASE_AUTH_SMS_TWILIO_AUTH_TOKEN)"
 # 4152127777 = "123456"
 
 # Configure one of the supported captcha providers: `hcaptcha`, `turnstile`.
-[auth.captcha]
-enabled = false
-provider = "hcaptcha"
-secret = "env(SUPABASE_AUTH_CAPTCHA_SECRET)"
+# Note: Captcha configuration is now managed via Supabase Dashboard
+# [auth.captcha]
+# enabled = false
+# provider = "hcaptcha"
+# secret = "env(SUPABASE_AUTH_CAPTCHA_SECRET)"
 
 # Use an external OAuth provider. The full list of providers are: `apple`, `azure`, `bitbucket`,
 # `discord`, `facebook`, `github`, `gitlab`, `google`, `keycloak`, `linkedin`, `notion`, `twitch`,

@@ -54,25 +54,50 @@ jobs:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           echo "🔗 Linking to Supabase project: $SUPABASE_PROJECT_ID"
+          echo "📝 Verifying secrets are set..."
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "❌ SUPABASE_ACCESS_TOKEN is not set"
+            exit 1
+          fi
+          if [ -z "$SUPABASE_PROJECT_ID" ]; then
+            echo "❌ SUPABASE_PROJECT_ID is not set"
+            exit 1
+          fi
+          if [ -z "$SUPABASE_DB_PASSWORD" ]; then
+            echo "❌ SUPABASE_DB_PASSWORD is not set"
+            exit 1
+          fi
+          echo "✅ All secrets are set"
+          echo "🔐 Password length: ${#SUPABASE_DB_PASSWORD} characters"
+          
           # Retry linking in case of temporary connection issues
           for i in 1 2 3; do
-            if npx supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"; then
+            echo "🔄 Link attempt $i of 3..."
+            if npx supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD" 2>&1; then
               echo "✅ Successfully linked to Supabase project"
-              # Verify link by checking project status
-              if npx supabase projects list 2>/dev/null | grep -q "$SUPABASE_PROJECT_ID"; then
-                echo "✅ Link verification successful"
+              # Verify link by checking if .temp directory was created
+              if [ -f "supabase/.temp/project-ref" ]; then
+                echo "✅ Link verification successful (project-ref file exists)"
                 exit 0
               else
-                echo "⚠️  Link completed but verification failed, continuing anyway..."
+                echo "⚠️  Link completed but project-ref file not found, continuing anyway..."
                 exit 0
               fi
-            fi
-            if [ $i -lt 3 ]; then
-              echo "❌ Link attempt $i failed, retrying in 5 seconds..."
-              sleep 5
+            else
+              LINK_EXIT_CODE=$?
+              echo "❌ Link attempt $i failed with exit code $LINK_EXIT_CODE"
+              if [ $i -lt 3 ]; then
+                echo "⏳ Retrying in 5 seconds..."
+                sleep 5
+              fi
             fi
           done
           echo "❌ Failed to link after 3 attempts"
+          echo "💡 Troubleshooting tips:"
+          echo "   - Verify SUPABASE_DB_PASSWORD is correct in GitHub Secrets"
+          echo "   - Check that the password matches the one in Supabase Dashboard → Settings → Database"
+          echo "   - Ensure SUPABASE_ACCESS_TOKEN is a personal access token (not service role key)"
+          echo "   - Verify SUPABASE_PROJECT_ID matches your project's Reference ID"
           exit 1
       
       - name: Run database migrations
