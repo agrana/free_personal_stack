@@ -1,21 +1,13 @@
-import { createServerClient } from '@/app/lib/supabase-server';
-import { redirect } from 'next/navigation';
+import { Suspense } from 'react';
 import VerificationDashboard from '@/app/components/VerificationDashboard';
+import DashboardSkeleton from '@/app/components/DashboardSkeleton';
 
-export default async function Home() {
-  const supabase = createServerClient();
-
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session) {
-    redirect('/auth/signin');
-  }
-
+export default function Home() {
   return (
     <div className="min-h-screen bg-gray-50">
-      <VerificationDashboard />
+      <Suspense fallback={<DashboardSkeleton />}>
+        <VerificationDashboard />
+      </Suspense>
     </div>
   );
 }

@@ -1,11 +1,25 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import DomainVerification from './DomainVerification';
-import AuthVerification from './AuthVerification';
-import DatabaseVerification from './DatabaseVerification';
-import EmailRoutingVerification from './EmailRoutingVerification';
+import { useEffect, useState, lazy, Suspense } from 'react';
+import { useRouter } from 'next/navigation';
+import { createClient } from '@/app/lib/supabase';
 import ConfigurationCheck from './ConfigurationCheck';
+
+// Lazy load verification components to improve initial render
+const DomainVerification = lazy(() => import('./DomainVerification'));
+const AuthVerification = lazy(() => import('./AuthVerification'));
+const DatabaseVerification = lazy(() => import('./DatabaseVerification'));
+const EmailRoutingVerification = lazy(() => import('./EmailRoutingVerification'));
+
+const VerificationSkeleton = () => (
+  <div className="bg-white rounded-lg shadow-sm border p-6 animate-pulse">
+    <div className="h-6 w-40 bg-gray-200 rounded mb-4" />
+    <div className="space-y-3">
+      <div className="h-4 w-full bg-gray-200 rounded" />
+      <div className="h-4 w-3/4 bg-gray-200 rounded" />
+    </div>
+  </div>
+);
 
 interface VerificationStatus {
   domain: 'checking' | 'success' | 'error';
@@ -15,6 +29,7 @@ interface VerificationStatus {
 }
 
 export default function VerificationDashboard() {
+  const router = useRouter();
   const [statuses, setStatuses] = useState<VerificationStatus>({
     domain: 'checking',
     auth: 'checking',
@@ -22,11 +37,43 @@ export default function VerificationDashboard() {
     email: 'checking',
   });
   const [configError, setConfigError] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  // Check authentication on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      const supabase = createClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      
+      if (!session) {
+        router.push('/auth/signin');
+        return;
+      }
+      
+      setAuthChecked(true);
+    };
+
+    checkAuth();
+  }, [router]);
 
   const allSuccess = Object.values(statuses).every(
     (status) => status === 'success'
   );
   const anyError = Object.values(statuses).some((status) => status === 'error');
+
+  // Show loading state while checking auth
+  if (!authChecked) {
+    return (
+      <div className="max-w-6xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+          <p className="mt-4 text-gray-600">Checking authentication...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
@@ -151,26 +198,34 @@ export default function VerificationDashboard() {
 
       {/* Verification Components */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <DomainVerification
-          onStatusChange={(status) =>
-            setStatuses((prev) => ({ ...prev, domain: status }))
-          }
-        />
-        <AuthVerification
-          onStatusChange={(status) =>
-            setStatuses((prev) => ({ ...prev, auth: status }))
-          }
-        />
-        <DatabaseVerification
-          onStatusChange={(status) =>
-            setStatuses((prev) => ({ ...prev, database: status }))
-          }
-        />
-        <EmailRoutingVerification
-          onStatusChange={(status) =>
-            setStatuses((prev) => ({ ...prev, email: status }))
-          }
-        />
+        <Suspense fallback={<VerificationSkeleton />}>
+          <DomainVerification
+            onStatusChange={(status) =>
+              setStatuses((prev) => ({ ...prev, domain: status }))
+            }
+          />
+        </Suspense>
+        <Suspense fallback={<VerificationSkeleton />}>
+          <AuthVerification
+            onStatusChange={(status) =>
+              setStatuses((prev) => ({ ...prev, auth: status }))
+            }
+          />
+        </Suspense>
+        <Suspense fallback={<VerificationSkeleton />}>
+          <DatabaseVerification
+            onStatusChange={(status) =>
+              setStatuses((prev) => ({ ...prev, database: status }))
+            }
+          />
+        </Suspense>
+        <Suspense fallback={<VerificationSkeleton />}>
+          <EmailRoutingVerification
+            onStatusChange={(status) =>
+              setStatuses((prev) => ({ ...prev, email: status }))
+            }
+          />
+        </Suspense>
       </div>
 
       {/* Next Steps */}
