@@ -109,13 +109,6 @@ jobs:
           location: artifact
           directory: ${{ env.WORKING_DIRECTORY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Debug State Download
-        if: github.event_name != 'pull_request' && steps.download-state.outcome == 'success'
-        run: |
-          echo "State download completed"
-          echo "Checking for state file..."
-          ls -lah "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate*" || echo "No state files found"
 
       - name: Verify State File Has Resources
         if: github.event_name != 'pull_request' && steps.download-state.outcome == 'success'
@@ -307,9 +300,10 @@ jobs:
           retention-days: 1
           if-no-files-found: ignore
 
-      - name: Upload State After Plan (for next run)
+      - name: Upload State After Plan
         if: steps.plan.outcome == 'success' && github.event_name != 'pull_request'
         uses: badgerhobbs/terraform-state@v2
+        continue-on-error: true
         with:
           encryption_key: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
           operation: upload
