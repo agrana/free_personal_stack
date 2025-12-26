@@ -181,7 +181,7 @@ After running `npm run dev`, you'll have:
 - **Cause**: Wrong password or token type
 - **Fix**: 
   - `SUPABASE_ACCESS_TOKEN` must be a **personal access token** (from Account → Access Tokens), NOT the service role key
-  - `SUPABASE_DB_PASSWORD` is the database password you set when creating the project
+  - `SUPABASE_DATABASE_PASSWORD` is the database password you set when creating the project
 
 **Error: "Circuit breaker open" or connection timeouts**
 - **Cause**: Supabase infrastructure issue or database paused
