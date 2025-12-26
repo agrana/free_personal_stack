@@ -14,4 +14,3 @@
 That's it. You don't need to clone anything locally. Everything runs from GitHub.
 
 **Next:** [Part 2: Create Your Accounts](./02_Create_Accounts.md)
-
