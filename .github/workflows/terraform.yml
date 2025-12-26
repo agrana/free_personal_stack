@@ -334,7 +334,6 @@ jobs:
       - name: Terraform Format Check
         id: fmt
         run: terraform fmt -check
-        continue-on-error: true
 
       - name: Terraform Init
         run: terraform init
@@ -421,6 +420,7 @@ jobs:
           fi
 
       - name: Terraform Validate
+        id: validate
         run: terraform validate -no-color
 
       - name: Terraform Plan
@@ -467,11 +467,12 @@ jobs:
             }
 
             const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
             #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
 
             <details><summary>Show Plan</summary>
 
-            \`\`\`
+            \`\`\`terraform
             ${planOutput.substring(0, 65000)}
             \`\`\`
 
