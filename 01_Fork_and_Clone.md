@@ -1,4 +1,4 @@
-# Part 1: Fork the Repository
+# Part 1: Create the Repository from this template
 
 **Time: 1 minute**
 
@@ -7,9 +7,9 @@
 ## Step 1: Fork the Repository
 
 1. Go to [https://github.com/agrana/free_personal_stack](https://github.com/agrana/free_personal_stack)
-2. Click **"Fork"** in the top right
-3. Choose your account
-4. Wait for the fork to complete
+2. Click **"Use this template"** in the top right
+3. Choose repository name and add a description if you want.
+4. Wait for the template to finish creating.
 
 That's it. You don't need to clone anything locally. Everything runs from GitHub.
 
