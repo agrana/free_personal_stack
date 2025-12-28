@@ -59,45 +59,4 @@ jobs:
               }
             });
 
-      - name: Create Initial Issue
-        if: steps.check-initial.outputs.is_initial == 'true'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: '🚀 Welcome! Repository Setup Required',
-              body: '# Welcome to Your New Repository!\n\n' +
-                'This repository was created from a template. Follow these steps to get started:\n\n' +
-                '## Quick Start\n\n' +
-                '1. **Configure GitHub Secrets**\n' +
-                '   - Go to **Settings** → **Environments** → **New environment** → `production`\n' +
-                '   - Add all required secrets (see below)\n\n' +
-                '2. **Run Setup Validation**\n' +
-                '   - Go to **Actions** → **Repository Setup** → **Run workflow**\n' +
-                '   - Select `validate` mode to check your secrets\n\n' +
-                '3. **Deploy Infrastructure**\n' +
-                '   - Once secrets are validated, run **Terraform Infrastructure** workflow\n' +
-                '   - Start with `plan` command to preview changes\n\n' +
-                '## Required Secrets\n\n' +
-                'You need to configure these secrets in the `production` environment:\n\n' +
-                '- `CLOUDFLARE_API_TOKEN` - Your Cloudflare API token\n' +
-                '- `VERCEL_API_TOKEN` - Your Vercel API token\n' +
-                '- `SUPABASE_URL` - Your Supabase project URL\n' +
-                '- `SUPABASE_ANON_KEY` - Supabase anonymous key\n' +
-                '- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key\n' +
-                '- `SUPABASE_ACCESS_TOKEN` - Supabase access token\n' +
-                '- `SUPABASE_PROJECT_ID` - Supabase project ID\n' +
-                '- `DOMAIN_NAME` - Your domain name\n' +
-                '- `TERRAFORM_STATE_PASSWORD` - Generate with: `openssl rand -base64 32`\n\n' +
-                '## Next Steps\n\n' +
-                '- [ ] Create `production` environment in GitHub\n' +
-                '- [ ] Add all required secrets\n' +
-                '- [ ] Run "Repository Setup" workflow → "validate" mode\n' +
-                '- [ ] Run "Terraform Infrastructure" workflow → "plan" command\n' +
-                '- [ ] Review the plan and run "apply" when ready\n\n' +
-                'For detailed instructions, see [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md)'
-            });
 

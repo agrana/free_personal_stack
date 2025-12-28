@@ -62,36 +62,55 @@ jobs:
           # Report invalid secrets
           if [ ${#invalid_secrets[@]} -gt 0 ]; then
             echo "::error title=Invalid Secret Format::One or more secrets have invalid format" >> $GITHUB_STEP_SUMMARY
-            echo "❌ Invalid secret format (${#invalid_secrets[@]}):" >> $GITHUB_STEP_SUMMARY
+            echo "## ❌ Invalid Secret Format" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**${#invalid_secrets[@]} secret(s) have invalid format:**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Secret Name | Issue |" >> $GITHUB_STEP_SUMMARY
+            echo "|------------|-------|" >> $GITHUB_STEP_SUMMARY
             for secret in "${invalid_secrets[@]}"; do
-              echo "- \`$secret\`" >> $GITHUB_STEP_SUMMARY
+              echo "| \`$secret\` | Invalid format |" >> $GITHUB_STEP_SUMMARY
             done
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### How to Fix:" >> $GITHUB_STEP_SUMMARY
+            echo "### 📋 How to Fix" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
             echo "1. Go to **Settings** → **Environments** → **production**" >> $GITHUB_STEP_SUMMARY
-            echo "2. Update the secret with a valid value" >> $GITHUB_STEP_SUMMARY
-            echo "3. For CLOUDFLARE_API_TOKEN: Must be exactly 40 characters, alphanumeric, hyphens, or underscores only" >> $GITHUB_STEP_SUMMARY
-            echo "4. Re-run this workflow to validate" >> $GITHUB_STEP_SUMMARY
+            echo "2. Update the secret(s) listed above with valid values" >> $GITHUB_STEP_SUMMARY
+            echo "3. For \`CLOUDFLARE_API_TOKEN\`: Must be exactly 40 characters, alphanumeric, hyphens, or underscores only" >> $GITHUB_STEP_SUMMARY
+            echo "4. Re-run this workflow in 'validate' mode to verify" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
           
           if [ ${#missing_secrets[@]} -eq 0 ]; then
-            echo "✅ All required secrets are configured!" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **All required secrets are configured!**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "You can now run the Terraform workflow." >> $GITHUB_STEP_SUMMARY
           else
             echo "::error title=Missing Required Secrets::${#missing_secrets[@]} required secret(s) are missing" >> $GITHUB_STEP_SUMMARY
-            echo "❌ Missing required secrets (${#missing_secrets[@]}):" >> $GITHUB_STEP_SUMMARY
+            echo "## ❌ Missing Required Secrets" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**${#missing_secrets[@]} secret(s) need to be configured:**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Secret Name | Status |" >> $GITHUB_STEP_SUMMARY
+            echo "|------------|--------|" >> $GITHUB_STEP_SUMMARY
+            for secret in "${missing_secrets[@]}"; do
+              echo "| \`$secret\` | ❌ Missing |" >> $GITHUB_STEP_SUMMARY
+            done
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 📋 How to Fix" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "1. Go to **Settings** → **Environments** → **production**" >> $GITHUB_STEP_SUMMARY
+            echo "2. Click **Add secret** for each missing secret listed above" >> $GITHUB_STEP_SUMMARY
+            echo "3. Copy the secret name from the table above" >> $GITHUB_STEP_SUMMARY
+            echo "4. Paste your secret value" >> $GITHUB_STEP_SUMMARY
+            echo "5. Re-run this workflow in 'validate' mode to verify all secrets are set" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 💡 Quick Reference" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Missing secrets to add:**" >> $GITHUB_STEP_SUMMARY
             for secret in "${missing_secrets[@]}"; do
               echo "- \`$secret\`" >> $GITHUB_STEP_SUMMARY
             done
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### How to Fix:" >> $GITHUB_STEP_SUMMARY
-            echo "1. Go to **Settings** → **Environments** → **production**" >> $GITHUB_STEP_SUMMARY
-            echo "2. Click **Add secret** and add each of the missing secrets listed above." >> $GITHUB_STEP_SUMMARY
-            echo "3. Re-run this workflow in 'validate' mode to confirm all secrets are set." >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
@@ -154,7 +173,24 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            github.rest.issues.create({
+            // Check if welcome issue already exists to prevent duplicates
+            const { data: existingIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'welcome'
+            });
+            
+            const hasWelcomeIssue = existingIssues.some(issue => 
+              issue.title.includes('Welcome') || issue.title.includes('Setup Required')
+            );
+            
+            if (hasWelcomeIssue) {
+              console.log('⚠️  Welcome issue already exists, skipping creation');
+              return;
+            }
+            
+            await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: '🚀 Setup Required: Configure GitHub Secrets',
@@ -172,7 +208,7 @@ jobs:
               
               See [SECRETS_TEMPLATE.md](SECRETS_TEMPLATE.md) for the complete list.
               
-              **Minimum Required (8 secrets):**
+              **Minimum Required (9 secrets):**
               - \`CLOUDFLARE_API_TOKEN\`
               - \`VERCEL_API_TOKEN\`
               - \`SUPABASE_URL\`
@@ -190,7 +226,8 @@ jobs:
               - [ ] Run "Repository Setup" workflow → "validate" mode
               - [ ] Run Terraform workflow → "plan" command
               
-              See [.github/MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md) for detailed instructions.`
+              See [.github/MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md) for detailed instructions.`,
+              labels: ['welcome']
             })
 
       - name: Commit Template
@@ -209,15 +246,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Install GitHub CLI
-        run: |
-          type -p curl >/dev/null || sudo apt update && sudo apt install curl -y
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-          sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-          sudo apt update
-          sudo apt install gh -y
 
       - name: Create Production Environment
         uses: actions/github-script@v7
@@ -244,122 +272,14 @@ jobs:
               }
             }
 
-      - name: Check Existing Secrets
-        id: check-secrets
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
-          DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
-          TERRAFORM_STATE_PASSWORD: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
-        run: |
-          missing_secrets=()
-          existing_secrets=()
-          
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then missing_secrets+=("CLOUDFLARE_API_TOKEN"); else existing_secrets+=("CLOUDFLARE_API_TOKEN"); fi
-          if [ -z "$VERCEL_API_TOKEN" ]; then missing_secrets+=("VERCEL_API_TOKEN"); else existing_secrets+=("VERCEL_API_TOKEN"); fi
-          if [ -z "$SUPABASE_URL" ]; then missing_secrets+=("SUPABASE_URL"); else existing_secrets+=("SUPABASE_URL"); fi
-          if [ -z "$SUPABASE_ANON_KEY" ]; then missing_secrets+=("SUPABASE_ANON_KEY"); else existing_secrets+=("SUPABASE_ANON_KEY"); fi
-          if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then missing_secrets+=("SUPABASE_SERVICE_ROLE_KEY"); else existing_secrets+=("SUPABASE_SERVICE_ROLE_KEY"); fi
-          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then missing_secrets+=("SUPABASE_ACCESS_TOKEN"); else existing_secrets+=("SUPABASE_ACCESS_TOKEN"); fi
-          if [ -z "$SUPABASE_PROJECT_ID" ]; then missing_secrets+=("SUPABASE_PROJECT_ID"); else existing_secrets+=("SUPABASE_PROJECT_ID"); fi
-          if [ -z "$DOMAIN_NAME" ]; then missing_secrets+=("DOMAIN_NAME"); else existing_secrets+=("DOMAIN_NAME"); fi
-          if [ -z "$TERRAFORM_STATE_PASSWORD" ]; then missing_secrets+=("TERRAFORM_STATE_PASSWORD"); else existing_secrets+=("TERRAFORM_STATE_PASSWORD"); fi
-          
-          if [ ${#existing_secrets[@]} -gt 0 ]; then
-            echo "existing=$(IFS=','; echo "${existing_secrets[*]}")" >> $GITHUB_OUTPUT
-          fi
-          if [ ${#missing_secrets[@]} -gt 0 ]; then
-            echo "missing=$(IFS=','; echo "${missing_secrets[*]}")" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Generate TERRAFORM_STATE_PASSWORD
-        id: generate-password
-        if: contains(steps.check-secrets.outputs.missing, 'TERRAFORM_STATE_PASSWORD')
-        run: |
-          PASSWORD=$(openssl rand -base64 32)
-          echo "password=$PASSWORD" >> $GITHUB_OUTPUT
-          echo "✅ Generated TERRAFORM_STATE_PASSWORD"
-
-      - name: Create Auto-Generated Secrets via GitHub CLI
-        id: set-password
-        if: steps.generate-password.outputs.password != ''
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          echo "## 🔐 Auto-Setting Secrets" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [ -z "$GH_PAT" ]; then
-            echo "⚠️  GH_PAT not provided, skipping auto-set of TERRAFORM_STATE_PASSWORD" >> $GITHUB_STEP_SUMMARY
-            echo "💡 To enable auto-setting secrets, add a \`GH_PAT\` secret with admin permissions." >> $GITHUB_STEP_SUMMARY
-            exit 0
-          fi
-          
-          gh auth login --with-token <<< "$GH_PAT"
-          
-          if [ -n "${{ steps.generate-password.outputs.password }}" ]; then
-            echo "${{ steps.generate-password.outputs.password }}" | gh secret set TERRAFORM_STATE_PASSWORD --env production --repo "${{ github.repository }}"
-            echo "✅ Created secret: \`TERRAFORM_STATE_PASSWORD\` (auto-generated)" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "💡 To auto-create other secrets, provide them as environment variables or add them manually in GitHub Settings." >> $GITHUB_STEP_SUMMARY
-
       - name: Report Setup Status
         run: |
           echo "## 📊 Setup Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
-          EXISTING="${{ steps.check-secrets.outputs.existing }}"
-          MISSING="${{ steps.check-secrets.outputs.missing }}"
-          PASSWORD_GENERATED="${{ steps.generate-password.outputs.password != '' }}"
-          SET_PASSWORD_OUTCOME="${{ steps.set-password.outcome }}"
-          GH_PAT_PROVIDED="false"
-          if [ "$SET_PASSWORD_OUTCOME" = "success" ]; then
-            GH_PAT_PROVIDED="true"
-          fi
-          
-          if [ -n "$EXISTING" ]; then
-            echo "### ✅ Existing Secrets" >> $GITHUB_STEP_SUMMARY
-            IFS=',' read -ra EXISTING_ARRAY <<< "$EXISTING"
-            for secret in "${EXISTING_ARRAY[@]}"; do
-              echo "- \`$secret\`" >> $GITHUB_STEP_SUMMARY
-            done
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ -n "$MISSING" ]; then
-            echo "### ⚠️  Missing Secrets" >> $GITHUB_STEP_SUMMARY
-            IFS=',' read -ra MISSING_ARRAY <<< "$MISSING"
-            for secret in "${MISSING_ARRAY[@]}"; do
-              if [ "$secret" == "TERRAFORM_STATE_PASSWORD" ] && [ "$PASSWORD_GENERATED" == "true" ] && [ "$GH_PAT_PROVIDED" == "true" ]; then
-                echo "- \`$secret\` ✅ (auto-generated and set)" >> $GITHUB_STEP_SUMMARY
-              elif [ "$secret" == "TERRAFORM_STATE_PASSWORD" ] && [ "$PASSWORD_GENERATED" == "true" ]; then
-                echo "- \`$secret\` ⚠️  (generated but not set - add \`GH_PAT\` secret to auto-set)" >> $GITHUB_STEP_SUMMARY
-                echo "  Generated value: \`${{ steps.generate-password.outputs.password }}\`" >> $GITHUB_STEP_SUMMARY
-              else
-                echo "- \`$secret\` (needs manual setup)" >> $GITHUB_STEP_SUMMARY
-              fi
-            done
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [ -z "$MISSING" ]; then
-            echo "✅ All secrets are configured! You can now run the Terraform workflow." >> $GITHUB_STEP_SUMMARY
-          elif [ "$MISSING" == "TERRAFORM_STATE_PASSWORD" ] && [ "$PASSWORD_GENERATED" == "true" ] && [ "$GH_PAT_PROVIDED" == "true" ]; then
-            echo "✅ All secrets are configured! You can now run the Terraform workflow." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️  Some secrets still need to be configured." >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**To set secrets:**" >> $GITHUB_STEP_SUMMARY
-            echo "1. Go to **Settings** → **Environments** → **production** → **Add secret**" >> $GITHUB_STEP_SUMMARY
-            if [ "$GH_PAT_PROVIDED" != "true" ]; then
-              echo "2. Or add a \`GH_PAT\` secret (Personal Access Token with \`admin:repo\` scope) to enable auto-creation" >> $GITHUB_STEP_SUMMARY
-            fi
-          fi
+          echo "✅ Production environment created successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next steps:**" >> $GITHUB_STEP_SUMMARY
+          echo "1. Go to **Settings** → **Environments** → **production** → **Add secret**" >> $GITHUB_STEP_SUMMARY
+          echo "2. Add all required secrets (see the welcome issue for the complete list)" >> $GITHUB_STEP_SUMMARY
+          echo "3. Run the **Repository Setup** workflow in 'validate' mode to verify your secrets" >> $GITHUB_STEP_SUMMARY
 

@@ -1,23 +1,24 @@
 # Part 6: Build Your App From Scratch
 
-**Now that your framework is running, let's build your actual app.**
+**Now that your infrastructure is verified and running, let's build your actual app.**
 
-This guide walks you through customizing the template and building your own features from scratch.
+This guide walks you through understanding what you have and building your own features from scratch.
 
 ---
 
 ## 📋 Table of Contents
 
 1. [Understanding the Current Structure](#understanding-the-current-structure)
-2. [Development Workflow](#development-workflow)
-3. [Step-by-Step: Building a New Feature](#step-by-step-building-a-new-feature)
-4. [Database: Adding New Tables](#database-adding-new-tables)
-5. [Frontend: Creating Pages and Components](#frontend-creating-pages-and-components)
-6. [Styling and Theming](#styling-and-theming)
-7. [Authentication and User Data](#authentication-and-user-data)
-8. [Deploying Your Changes](#deploying-your-changes)
-9. [Common Patterns and Examples](#common-patterns-and-examples)
-10. [Best Practices](#best-practices)
+2. [Your Verification Dashboard](#your-verification-dashboard)
+3. [Key Concepts](#key-concepts)
+4. [Step-by-Step: Building a New Feature](#step-by-step-building-a-new-feature)
+5. [Database: Adding New Tables](#database-adding-new-tables)
+6. [Frontend: Creating Pages and Components](#frontend-creating-pages-and-components)
+7. [Styling and Theming](#styling-and-theming)
+8. [Authentication and User Data](#authentication-and-user-data)
+9. [Deploying Your Changes](#deploying-your-changes)
+10. [Common Patterns and Examples](#common-patterns-and-examples)
+11. [Best Practices](#best-practices)
 
 ---
 
@@ -28,8 +29,11 @@ This guide walks you through customizing the template and building your own feat
 ```
 app/
 ├── components/          # Reusable React components
-│   ├── AddTodo.tsx     # Example: Form component
-│   └── TodoList.tsx    # Example: List component
+│   ├── VerificationDashboard.tsx  # Infrastructure verification dashboard
+│   ├── DomainVerification.tsx     # Domain configuration check
+│   ├── AuthVerification.tsx      # Authentication check
+│   ├── DatabaseVerification.tsx  # Database connection check
+│   └── EmailRoutingVerification.tsx  # Email routing check
 ├── auth/               # Authentication pages
 │   ├── signin/         # Sign in/sign up page
 │   └── signout/        # Sign out route
@@ -39,7 +43,7 @@ app/
 ├── types/              # TypeScript type definitions
 │   └── index.ts
 ├── layout.tsx          # Root layout (wraps all pages)
-├── page.tsx            # Home page (/)
+├── page.tsx            # Home page (shows verification dashboard)
 └── globals.css         # Global styles
 
 supabase/
@@ -48,12 +52,39 @@ supabase/
 └── config.toml        # Supabase configuration
 ```
 
-### Key Concepts
+## Your Verification Dashboard
+
+When you first visit your deployed app, you'll see the **Infrastructure Verification Dashboard**. This dashboard verifies that all your infrastructure components are properly configured:
+
+### ✅ Domain Verification
+- Checks that your custom domain is properly configured
+- Verifies DNS records are set correctly
+- Confirms HTTPS is working
+
+### ✅ Authentication Verification
+- Tests Supabase authentication connection
+- Verifies sign-in/sign-up functionality
+- Confirms user session management
+
+### ✅ Database Verification
+- Tests database connection
+- Verifies migrations have been applied
+- Confirms you can read/write data
+
+### ✅ Email Routing Verification
+- Checks email routing configuration (if enabled)
+- Verifies forwarding rules are set up
+
+Once all verifications pass, you'll see a success message indicating your infrastructure is ready. **This is your canvas** - a clean, verified foundation where you can start building your application.
+
+---
+
+## Key Concepts
 
 **Next.js App Router:**
 - `page.tsx` = a route (e.g., `app/page.tsx` = `/`, `app/about/page.tsx` = `/about`)
 - `layout.tsx` = wrapper that applies to all child routes
-- `route.ts` = API endpoint (e.g., `app/api/todos/route.ts` = `/api/todos`)
+- `route.ts` = API endpoint (e.g., `app/api/items/route.ts` = `/api/items`)
 
 **Supabase Integration:**
 - `lib/supabase.ts` = client-side (browser) - for client components
@@ -64,45 +95,16 @@ supabase/
 - Types defined in `app/types/index.ts`
 - Supabase types can be generated: `npx supabase gen types typescript --project-id YOUR_ID > types/supabase.ts`
 
----
-
-## Development Workflow
-
-### 1. Start Development Server
-
-```bash
-npm run dev
-```
-
-Visit `http://localhost:3000` to see your app.
-
-### 2. Make Changes
-
-- Edit files in `app/`
-- Changes auto-reload (Hot Module Replacement)
-- Check browser console for errors
-
-### 3. Test Locally
-
-- Test authentication flows
-- Test database operations
-- Verify UI looks correct
-
-### 4. Commit and Push
-
-```bash
-git add .
-git commit -m "Add new feature"
-git push origin main
-```
-
-Vercel automatically deploys on push to `main`.
+**Working in GitHub:**
+- Edit files directly in GitHub's web interface
+- Or use GitHub Codespaces for a full development environment
+- All changes deploy automatically when you push to `main`
 
 ---
 
 ## Step-by-Step: Building a New Feature
 
-Let's build a **Notes** feature as an example. This will show you the complete process.
+Let's build a **Notes** feature as an example. This will show you the complete process from database to UI.
 
 ### Step 1: Create Database Migration
 
@@ -513,7 +515,7 @@ import { createServerClient } from '@/app/lib/supabase-server';
 export default async function HomePage() {
   const supabase = createServerClient();
   // Fetch data here
-  const { data } = await supabase.from('todos').select('*');
+  const { data } = await supabase.from('items').select('*');
   
   return <div>{/* Render data */}</div>;
 }
@@ -551,7 +553,7 @@ components/
 │   │   ├── AddNote.tsx
 │   │   ├── NotesList.tsx
 │   │   └── NoteCard.tsx
-│   └── todos/
+│   └── your-feature/
 └── layout/          # Layout components (Header, Footer, Sidebar)
 ```
 
@@ -674,28 +676,20 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 
 ### Workflow
 
-1. **Make changes locally**
-2. **Test thoroughly** with `npm run dev`
-3. **Commit changes:**
-   ```bash
-   git add .
-   git commit -m "Add notes feature"
-   git push origin main
-   ```
-4. **Automatic deployment:**
+1. **Make changes in GitHub**
+   - Edit files directly in the web interface
+   - Or use GitHub Codespaces for a full editor
+2. **Commit changes:**
+   - Use GitHub's commit interface
+   - Or push from Codespaces: `git add . && git commit -m "Add notes feature" && git push`
+3. **Automatic deployment:**
    - Vercel builds and deploys automatically
    - GitHub Actions runs database migrations
    - Your changes are live in ~2-3 minutes
 
 ### Database Migrations
 
-Migrations run automatically via GitHub Actions on push. To run manually:
-
-```bash
-npx supabase db push
-```
-
-Or trigger the workflow manually in GitHub Actions.
+Migrations run automatically via GitHub Actions on push to `main`. You can also trigger the workflow manually in GitHub Actions.
 
 ### Environment Variables
 
@@ -883,13 +877,23 @@ const handleOperation = async () => {
 
 ---
 
-## Next Steps
+## Your Canvas is Ready
 
-1. **Remove the demo todo app** - Delete `app/components/TodoList.tsx`, `AddTodo.tsx`, and todo-related code
-2. **Customize the homepage** - Update `app/page.tsx` with your app's landing page
-3. **Design your data model** - Plan your database schema
-4. **Build your first feature** - Start with the core functionality
-5. **Iterate and improve** - Add features incrementally
+Once all verifications pass on your dashboard, you have a clean canvas to build on:
+
+- ✅ **Infrastructure verified** - Domain, Auth, Database, Email all working
+- ✅ **Authentication ready** - Users can sign up and sign in
+- ✅ **Database connected** - Ready for your data models
+- ✅ **Deployment automated** - Every push deploys automatically
+
+### Next Steps
+
+1. **Plan your app** - What problem are you solving?
+2. **Design your data model** - What tables do you need?
+3. **Build your first feature** - Start with core functionality
+4. **Iterate and improve** - Add features incrementally
+
+The verification dashboard will remain accessible, but you can now replace `app/page.tsx` with your own homepage and start building your application features.
 
 ---
 

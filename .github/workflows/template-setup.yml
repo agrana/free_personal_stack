@@ -69,38 +69,6 @@ jobs:
               }
             }
 
-      - name: Install GitHub CLI
-        if: steps.check-initial.outputs.is_initial == 'true'
-        run: |
-          type -p curl >/dev/null || sudo apt update && sudo apt install curl -y
-          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-          sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-          sudo apt update
-          sudo apt install gh -y
-
-      - name: Generate TERRAFORM_STATE_PASSWORD
-        if: steps.check-initial.outputs.is_initial == 'true'
-        id: generate-password
-        run: |
-          PASSWORD=$(openssl rand -base64 32)
-          echo "password=$PASSWORD" >> $GITHUB_OUTPUT
-          echo "✅ Generated TERRAFORM_STATE_PASSWORD"
-
-      - name: Set TERRAFORM_STATE_PASSWORD Secret
-        if: steps.check-initial.outputs.is_initial == 'true'
-        id: set-password
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          if [ -n "$GH_PAT" ]; then
-            echo "${{ steps.generate-password.outputs.password }}" | gh secret set TERRAFORM_STATE_PASSWORD --env production --repo "${{ github.repository }}"
-            echo "✅ Set TERRAFORM_STATE_PASSWORD secret"
-          else
-            echo "⚠️  GH_PAT not provided, skipping auto-set of TERRAFORM_STATE_PASSWORD"
-            echo "skipped=true" >> $GITHUB_OUTPUT
-          fi
-
       - name: Trigger Setup Workflow
         if: steps.check-initial.outputs.is_initial == 'true'
         uses: actions/github-script@v7
@@ -123,41 +91,58 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const passwordValue = '${{ steps.generate-password.outputs.password }}';
-            const setPasswordSkipped = '${{ steps.set-password.outputs.skipped }}' === 'true';
-            const passwordSet = !setPasswordSkipped && '${{ steps.set-password.outcome }}' === 'success';
-            const passwordDisplay = passwordSet ? '✅ (auto-set)' : `\`${passwordValue}\` (copy this value)`;
+            // Check if welcome issue already exists to prevent duplicates
+            const { data: existingIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'welcome'
+            });
             
-            github.rest.issues.create({
+            const hasWelcomeIssue = existingIssues.some(issue => 
+              issue.title.includes('Welcome') || issue.title.includes('Setup Required')
+            );
+            
+            if (hasWelcomeIssue) {
+              console.log('⚠️  Welcome issue already exists, skipping creation');
+              return;
+            }
+            
+            const issueBody = '# Welcome to Your New Repository!\n\n' +
+              'This repository was created from a template. Follow these steps to get started:\n\n' +
+              '## ✅ Auto-Setup Complete\n\n' +
+              '- ✅ Production environment created\n\n' +
+              '## 🔧 Next Steps\n\n' +
+              '1. **Configure GitHub Secrets**\n' +
+              '   - Go to **Settings** → **Environments** → **production** → **Add secret**\n' +
+              '   - Add the following required secrets:\n\n' +
+              '### Required Secrets\n\n' +
+              '- `CLOUDFLARE_API_TOKEN` - Your Cloudflare API token\n' +
+              '- `VERCEL_API_TOKEN` - Your Vercel API token\n' +
+              '- `SUPABASE_URL` - Your Supabase project URL\n' +
+              '- `SUPABASE_ANON_KEY` - Supabase anonymous key\n' +
+              '- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key\n' +
+              '- `SUPABASE_ACCESS_TOKEN` - Supabase access token\n' +
+              '- `SUPABASE_PROJECT_ID` - Supabase project ID\n' +
+              '- `DOMAIN_NAME` - Your domain name\n' +
+              '- `TERRAFORM_STATE_PASSWORD` - Generate with: `openssl rand -base64 32`\n' +
+              '\n2. **Validate Secrets**\n' +
+              '   - Go to **Actions** → **Repository Setup** → **Run workflow**\n' +
+              '   - Select `validate` mode to check your secrets\n' +
+              '   - The validation will clearly show which secrets are missing\n\n' +
+              '3. **Deploy Infrastructure**\n' +
+              '   - Once secrets are validated, run **Terraform Infrastructure** workflow\n' +
+              '   - Start with `plan` command to preview changes\n\n' +
+              '## 📚 Documentation\n\n' +
+              'For detailed instructions, see [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md)';
+            
+            const { data: issue } = await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: '🚀 Welcome! Repository Setup Required',
-              body: '# Welcome to Your New Repository!\n\n' +
-                'This repository was created from a template. Follow these steps to get started:\n\n' +
-                '## ✅ Auto-Setup Complete\n\n' +
-                '- ✅ Production environment created\n' +
-                `- ✅ TERRAFORM_STATE_PASSWORD: ${passwordDisplay}\n\n` +
-                '## 🔧 Next Steps\n\n' +
-                '1. **Configure GitHub Secrets**\n' +
-                '   - Go to **Settings** → **Environments** → **production** → **Add secret**\n' +
-                '   - Add the following required secrets:\n\n' +
-                '### Required Secrets\n\n' +
-                '- `CLOUDFLARE_API_TOKEN` - Your Cloudflare API token\n' +
-                '- `VERCEL_API_TOKEN` - Your Vercel API token\n' +
-                '- `SUPABASE_URL` - Your Supabase project URL\n' +
-                '- `SUPABASE_ANON_KEY` - Supabase anonymous key\n' +
-                '- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key\n' +
-                '- `SUPABASE_ACCESS_TOKEN` - Supabase access token\n' +
-                '- `SUPABASE_PROJECT_ID` - Supabase project ID\n' +
-                '- `DOMAIN_NAME` - Your domain name\n' +
-                (passwordSet ? '' : `- \`TERRAFORM_STATE_PASSWORD\` - Use: \`${passwordValue}\`\n`) +
-                '\n2. **Validate Secrets**\n' +
-                '   - Go to **Actions** → **Repository Setup** → **Run workflow**\n' +
-                '   - Select `validate` mode to check your secrets\n\n' +
-                '3. **Deploy Infrastructure**\n' +
-                '   - Once secrets are validated, run **Terraform Infrastructure** workflow\n' +
-                '   - Start with `plan` command to preview changes\n\n' +
-                '## 📚 Documentation\n\n' +
-                'For detailed instructions, see [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md)'
+              body: issueBody,
+              labels: ['welcome']
             });
+            
+            console.log(`✅ Created welcome issue #${issue.number}`);
 

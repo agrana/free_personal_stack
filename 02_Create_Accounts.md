@@ -16,7 +16,7 @@ You need accounts for three services. All have free tiers.
    - **Plan**: Free
 5. Wait 1-2 minutes for provisioning
 
-**Get credentials** (you'll need them in Part 3):
+**Get credentials** (you'll need them in Part 4):
 
 - **Project URL**: `https://xxxxx.supabase.co` (Project Settings → API → Project URL)
 - **Anon Key**: `eyJ...` (Project Settings → API → anon/public key)
@@ -62,5 +62,5 @@ Only needed if you have a custom domain.
 9. Click "Continue to summary" and then "Create Token"
 10. Copy the token immediately (you won't be able to see it again)
 
-**Next:** [Part 3: Configure for Deployment](./03_Local_Setup.md)
+**Next:** [Part 4: Deploy from GitHub](./04_Deploy.md)
 

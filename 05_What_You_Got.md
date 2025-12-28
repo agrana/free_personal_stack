@@ -55,28 +55,10 @@
    - Implement authentication flows
 
 3. **Deploy Changes**
-   - Make changes locally
-   - Test with `npm run dev`
+   - Make changes directly in GitHub (edit files in the web interface)
+   - Or use GitHub Codespaces if you prefer a code editor
    - Push to `main` branch
    - Changes deploy automatically
-
-## Common Commands
-
-```bash
-# Local development
-npm run dev              # Start dev server
-npm run build            # Build for production
-npm run lint             # Check code quality
-
-# Database
-npx supabase db push     # Push migrations
-npx supabase gen types typescript --project-id YOUR_ID > types/supabase.ts  # Generate types
-
-# Infrastructure
-cd terraform
-terraform plan           # Preview changes
-terraform apply          # Apply changes
-```
 
 ## Troubleshooting
 
@@ -105,4 +87,6 @@ terraform apply          # Apply changes
 ---
 
 **You now have a production-ready app stack. Start building.**
+
+**Next:** [Part 6: Build Your App](./06_Build_Your_App.md)
 

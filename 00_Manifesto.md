@@ -59,7 +59,7 @@ Free doesn't mean "good enough for demos." This stack gives you:
 
 A complete, production-ready stack that you can:
 
-- Fork in 5 minutes
+- Create from template in 1 minute
 - Deploy in 30 minutes
 - Run forever for free
 - Scale to thousands of users
@@ -99,5 +99,5 @@ Follow this guide and you'll have:
 
 ---
 
-**Ready?** [Start with Part 1: Fork and Clone](./01_Fork_and_Clone.md)
+**Ready?** [Start with Part 1: Create from Template](./01_Fork_and_Clone.md)
 
