@@ -108,25 +108,27 @@ jobs:
               return;
             }
             
-            const issueBody = '# Welcome to Your New Repository!\n\n' +
+            const issueBody = '# Repository setup instructions\n\n' +
               'This repository was created from a template. Follow these steps to get started:\n\n' +
-              '## ✅ Auto-Setup Complete\n\n' +
-              '- ✅ Production environment created\n\n' +
               '## 🔧 Next Steps\n\n' +
               '1. **Configure GitHub Secrets**\n' +
               '   - Go to **Settings** → **Environments** → **production** → **Add secret**\n' +
               '   - Add the following required secrets:\n\n' +
               '### Required Secrets\n\n' +
-              '- `CLOUDFLARE_API_TOKEN` - Your Cloudflare API token\n' +
-              '- `VERCEL_API_TOKEN` - Your Vercel API token\n' +
-              '- `SUPABASE_URL` - Your Supabase project URL\n' +
-              '- `SUPABASE_ANON_KEY` - Supabase anonymous key\n' +
-              '- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key\n' +
-              '- `SUPABASE_ACCESS_TOKEN` - Supabase access token\n' +
-              '- `SUPABASE_PROJECT_ID` - Supabase project ID\n' +
-              '- `DOMAIN_NAME` - Your domain name\n' +
-              '- `TERRAFORM_STATE_PASSWORD` - Generate with: `openssl rand -base64 32`\n' +
-              '\n2. **Validate Secrets**\n' +
+              '**Domain management**\n' +
+              '- `CLOUDFLARE_API_TOKEN` - Your Cloudflare API token (used by Terraform to create DNS records)\n' +
+              '- `DOMAIN_NAME` - Your domain name (used by Terraform to configure DNS and email routing)\n\n' +
+              '**Terraform**\n' +
+              '- `TERRAFORM_STATE_PASSWORD` - Generate with: `openssl rand -base64 32` (used to encrypt Terraform state file)\n\n' +
+              '**Vercel**\n' +
+              '- `VERCEL_API_TOKEN` - Your Vercel API token (used by Terraform to create Vercel project and set environment variables)\n\n' +
+              '**Supabase**\n' +
+              '- `SUPABASE_URL` - Your Supabase project URL (used by Terraform to configure Vercel environment variables and by the app)\n' +
+              '- `SUPABASE_ANON_KEY` - Supabase anonymous key (used by Terraform to set Vercel environment variables; used by the app in client-side code - safe to expose in browser, respects Row Level Security policies)\n' +
+              '- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key (used by Terraform to set Vercel environment variables; used by the app in server-side code only - bypasses RLS, keep secret)\n' +
+              '- `SUPABASE_ACCESS_TOKEN` - Supabase access token (used by GitHub Actions to run database migrations)\n' +
+              '- `SUPABASE_DATABASE_PASSWORD` - Your Supabase database password (used by GitHub Actions to link project and run migrations)\n\n' +
+              '2. **Validate Secrets**\n' +
               '   - Go to **Actions** → **Repository Setup** → **Run workflow**\n' +
               '   - Select `validate` mode to check your secrets\n' +
               '   - The validation will clearly show which secrets are missing\n\n' +
@@ -139,7 +141,7 @@ jobs:
             const { data: issue } = await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: '🚀 Welcome! Repository Setup Required',
+              title: 'Repository setup instructions',
               body: issueBody,
               labels: ['welcome']
             });

@@ -33,7 +33,7 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+          SUPABASE_DATABASE_PASSWORD: ${{ secrets.SUPABASE_DATABASE_PASSWORD }}
           DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
           TERRAFORM_STATE_PASSWORD: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
         run: |
@@ -42,6 +42,16 @@ jobs:
           
           missing_secrets=()
           invalid_secrets=()
+          warnings=()
+          
+          # Extract project ID from SUPABASE_URL if provided
+          if [ -n "$SUPABASE_URL" ]; then
+            # Extract project ID from URL: https://xxxxx.supabase.co -> xxxxx
+            EXTRACTED_PROJECT_ID=$(echo "$SUPABASE_URL" | sed -E 's|https?://([^.]+)\.supabase\.co.*|\1|')
+            if [ -n "$EXTRACTED_PROJECT_ID" ] && [ "$EXTRACTED_PROJECT_ID" != "$SUPABASE_URL" ]; then
+              echo "ℹ️  Project ID extracted from SUPABASE_URL: \`$EXTRACTED_PROJECT_ID\`" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
           
           # Check if secrets are set
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then 
@@ -51,11 +61,15 @@ jobs:
           fi
           
           if [ -z "$VERCEL_API_TOKEN" ]; then missing_secrets+=("VERCEL_API_TOKEN"); fi
-          if [ -z "$SUPABASE_URL" ]; then missing_secrets+=("SUPABASE_URL"); fi
+          if [ -z "$SUPABASE_URL" ]; then 
+            missing_secrets+=("SUPABASE_URL")
+          elif ! echo "$SUPABASE_URL" | grep -qE '^https?://[^.]+\.supabase\.co'; then
+            invalid_secrets+=("SUPABASE_URL (must be in format: https://xxxxx.supabase.co)")
+          fi
           if [ -z "$SUPABASE_ANON_KEY" ]; then missing_secrets+=("SUPABASE_ANON_KEY"); fi
           if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then missing_secrets+=("SUPABASE_SERVICE_ROLE_KEY"); fi
+          if [ -z "$SUPABASE_DATABASE_PASSWORD" ]; then missing_secrets+=("SUPABASE_DATABASE_PASSWORD"); fi
           if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then missing_secrets+=("SUPABASE_ACCESS_TOKEN"); fi
-          if [ -z "$SUPABASE_PROJECT_ID" ]; then missing_secrets+=("SUPABASE_PROJECT_ID"); fi
           if [ -z "$DOMAIN_NAME" ]; then missing_secrets+=("DOMAIN_NAME"); fi
           if [ -z "$TERRAFORM_STATE_PASSWORD" ]; then missing_secrets+=("TERRAFORM_STATE_PASSWORD"); fi
           
@@ -77,7 +91,8 @@ jobs:
             echo "1. Go to **Settings** → **Environments** → **production**" >> $GITHUB_STEP_SUMMARY
             echo "2. Update the secret(s) listed above with valid values" >> $GITHUB_STEP_SUMMARY
             echo "3. For \`CLOUDFLARE_API_TOKEN\`: Must be exactly 40 characters, alphanumeric, hyphens, or underscores only" >> $GITHUB_STEP_SUMMARY
-            echo "4. Re-run this workflow in 'validate' mode to verify" >> $GITHUB_STEP_SUMMARY
+            echo "4. For \`SUPABASE_URL\`: Must be in format \`https://xxxxx.supabase.co\`" >> $GITHUB_STEP_SUMMARY
+            echo "5. Re-run this workflow in 'validate' mode to verify" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
           
@@ -89,25 +104,56 @@ jobs:
             echo "::error title=Missing Required Secrets::${#missing_secrets[@]} required secret(s) are missing" >> $GITHUB_STEP_SUMMARY
             echo "## ❌ Missing Required Secrets" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**${#missing_secrets[@]} secret(s) need to be configured:**" >> $GITHUB_STEP_SUMMARY
+            echo "**${#missing_secrets[@]} required secret(s) need to be configured:**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| Secret Name | Status |" >> $GITHUB_STEP_SUMMARY
-            echo "|------------|--------|" >> $GITHUB_STEP_SUMMARY
+            echo "| # | Secret Name | Description |" >> $GITHUB_STEP_SUMMARY
+            echo "|---|------------|-------------|" >> $GITHUB_STEP_SUMMARY
+            counter=1
             for secret in "${missing_secrets[@]}"; do
-              echo "| \`$secret\` | ❌ Missing |" >> $GITHUB_STEP_SUMMARY
+              case "$secret" in
+                CLOUDFLARE_API_TOKEN)
+                  desc="Cloudflare API token"
+                  ;;
+                VERCEL_API_TOKEN)
+                  desc="Vercel API token"
+                  ;;
+                SUPABASE_URL)
+                  desc="Supabase project URL (format: https://xxxxx.supabase.co)"
+                  ;;
+                SUPABASE_ANON_KEY)
+                  desc="Supabase anonymous key"
+                  ;;
+                SUPABASE_SERVICE_ROLE_KEY)
+                  desc="Supabase service role key"
+                  ;;
+                SUPABASE_DATABASE_PASSWORD)
+                  desc="Database password (set when creating project)"
+                  ;;
+                SUPABASE_ACCESS_TOKEN)
+                  desc="Supabase personal access token (for database migrations)"
+                  ;;
+                DOMAIN_NAME)
+                  desc="Your domain name"
+                  ;;
+                TERRAFORM_STATE_PASSWORD)
+                  desc="Generate with: openssl rand -base64 32"
+                  ;;
+                *)
+                  desc="See documentation"
+                  ;;
+              esac
+              echo "| $counter | \`$secret\` | $desc |" >> $GITHUB_STEP_SUMMARY
+              counter=$((counter + 1))
             done
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### 📋 How to Fix" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "1. Go to **Settings** → **Environments** → **production**" >> $GITHUB_STEP_SUMMARY
-            echo "2. Click **Add secret** for each missing secret listed above" >> $GITHUB_STEP_SUMMARY
-            echo "3. Copy the secret name from the table above" >> $GITHUB_STEP_SUMMARY
-            echo "4. Paste your secret value" >> $GITHUB_STEP_SUMMARY
-            echo "5. Re-run this workflow in 'validate' mode to verify all secrets are set" >> $GITHUB_STEP_SUMMARY
+            echo "1. Go to **Settings** → **Environments** → **production** → **Add secret**" >> $GITHUB_STEP_SUMMARY
+            echo "2. Add each secret from the table above" >> $GITHUB_STEP_SUMMARY
+            echo "3. Re-run this workflow in 'validate' mode to verify" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 💡 Quick Reference" >> $GITHUB_STEP_SUMMARY
+            echo "### 💡 Quick Copy List" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Missing secrets to add:**" >> $GITHUB_STEP_SUMMARY
             for secret in "${missing_secrets[@]}"; do
               echo "- \`$secret\`" >> $GITHUB_STEP_SUMMARY
             done

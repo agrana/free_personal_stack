@@ -60,7 +60,7 @@ jobs:
       TF_VAR_supabase_anon_key: ${{ secrets.SUPABASE_ANON_KEY }}
       TF_VAR_supabase_service_role_key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       TF_VAR_supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      TF_VAR_supabase_project_id: ${{ secrets.SUPABASE_PROJECT_ID }}
+      TF_VAR_supabase_project_id: ${{ steps.validate-secrets.outputs.project_id }}
       TF_VAR_domain_name: ${{ secrets.DOMAIN_NAME }}
       TF_VAR_app_url: ${{ secrets.APP_URL }}
       TF_VAR_site_url: ${{ secrets.SITE_URL || format('https://{0}', secrets.DOMAIN_NAME) }}
@@ -107,7 +107,6 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
           DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
           TERRAFORM_STATE_PASSWORD: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
         run: |
@@ -116,15 +115,27 @@ jobs:
           
           missing_secrets=()
           
+          # Extract project ID from SUPABASE_URL
+          if [ -n "$SUPABASE_URL" ]; then
+            EXTRACTED_PROJECT_ID=$(echo "$SUPABASE_URL" | sed -E 's|https?://([^.]+)\.supabase\.co.*|\1|')
+            if [ -n "$EXTRACTED_PROJECT_ID" ] && [ "$EXTRACTED_PROJECT_ID" != "$SUPABASE_URL" ]; then
+              echo "project_id=$EXTRACTED_PROJECT_ID" >> $GITHUB_OUTPUT
+              echo "✅ Extracted project ID from SUPABASE_URL: \`$EXTRACTED_PROJECT_ID\`" >> $GITHUB_STEP_SUMMARY
+            else
+              missing_secrets+=("SUPABASE_URL (invalid format - must be https://xxxxx.supabase.co)")
+            fi
+          else
+            missing_secrets+=("SUPABASE_URL")
+          fi
+          
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then missing_secrets+=("CLOUDFLARE_API_TOKEN"); fi
           if [ -z "$VERCEL_API_TOKEN" ]; then missing_secrets+=("VERCEL_API_TOKEN"); fi
-          if [ -z "$SUPABASE_URL" ]; then missing_secrets+=("SUPABASE_URL"); fi
           if [ -z "$SUPABASE_ANON_KEY" ]; then missing_secrets+=("SUPABASE_ANON_KEY"); fi
           if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then missing_secrets+=("SUPABASE_SERVICE_ROLE_KEY"); fi
-          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then missing_secrets+=("SUPABASE_ACCESS_TOKEN"); fi
-          if [ -z "$SUPABASE_PROJECT_ID" ]; then missing_secrets+=("SUPABASE_PROJECT_ID"); fi
           if [ -z "$DOMAIN_NAME" ]; then missing_secrets+=("DOMAIN_NAME"); fi
           if [ -z "$TERRAFORM_STATE_PASSWORD" ]; then missing_secrets+=("TERRAFORM_STATE_PASSWORD"); fi
+          
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then missing_secrets+=("SUPABASE_ACCESS_TOKEN"); fi
           
           if [ ${#missing_secrets[@]} -gt 0 ]; then
             echo "::error title=Missing Required Secrets::${#missing_secrets[@]} required secret(s) are missing" >> $GITHUB_STEP_SUMMARY
@@ -345,7 +356,7 @@ jobs:
       TF_VAR_supabase_anon_key: ${{ secrets.SUPABASE_ANON_KEY }}
       TF_VAR_supabase_service_role_key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       TF_VAR_supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      TF_VAR_supabase_project_id: ${{ secrets.SUPABASE_PROJECT_ID }}
+      TF_VAR_supabase_project_id: ${{ steps.validate-secrets.outputs.project_id }}
       TF_VAR_domain_name: ${{ secrets.DOMAIN_NAME }}
       TF_VAR_app_url: ${{ secrets.APP_URL }}
       TF_VAR_site_url: ${{ secrets.SITE_URL || format('https://{0}', secrets.DOMAIN_NAME) }}
@@ -473,7 +484,7 @@ jobs:
       TF_VAR_supabase_anon_key: ${{ secrets.SUPABASE_ANON_KEY }}
       TF_VAR_supabase_service_role_key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       TF_VAR_supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      TF_VAR_supabase_project_id: ${{ secrets.SUPABASE_PROJECT_ID }}
+      TF_VAR_supabase_project_id: ${{ steps.validate-secrets.outputs.project_id }}
       TF_VAR_domain_name: ${{ secrets.DOMAIN_NAME }}
       TF_VAR_app_url: ${{ secrets.APP_URL }}
       TF_VAR_site_url: ${{ secrets.SITE_URL || format('https://{0}', secrets.DOMAIN_NAME) }}
