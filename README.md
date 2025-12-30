@@ -13,7 +13,7 @@ A complete, production-ready infrastructure template for personal projects using
 For detailed setup instructions, see:
 - [Blog Series](00_Manifesto.md) - Start here for the full journey
 - [Terraform with GitHub Actions](.github/TERRAFORM_SETUP.md) - Complete automation guide
-- [Quick Start Guide](QUICK_START.md) - Fastest path to deployment
+- [Quick Start Guide](docs/setup/QUICK_START.md) - Fastest path to deployment
 
 ## 📚 Documentation
 
@@ -29,8 +29,14 @@ For detailed setup instructions, see:
 ### Automation & Infrastructure
 - **[.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md)** - Run Terraform in GitHub Actions
 - **[.github/SECRETS_CHECKLIST.md](.github/SECRETS_CHECKLIST.md)** - Required secrets checklist
-- **[SETUP_HICCUPS.md](SETUP_HICCUPS.md)** - Common issues and solutions
+- **[docs/setup/SETUP_HICCUPS.md](docs/setup/SETUP_HICCUPS.md)** - Common issues and solutions
 - **[terraform/README.md](terraform/README.md)** - Terraform documentation
+
+### Additional Documentation
+- **[docs/README.md](docs/README.md)** - Complete documentation index
+- **[docs/architecture/](docs/architecture/)** - System architecture and design
+- **[docs/setup/](docs/setup/)** - Setup guides and troubleshooting
+- **[docs/development/](docs/development/)** - Development tools and practices
 
 ## 🎯 What You Get
 
@@ -102,7 +108,8 @@ See [02_Create_Accounts.md](02_Create_Accounts.md) for detailed instructions.
 ## 🐛 Troubleshooting
 
 Common issues and solutions:
-- [SETUP_HICCUPS.md](SETUP_HICCUPS.md) - All encountered issues
+- [docs/setup/SETUP_HICCUPS.md](docs/setup/SETUP_HICCUPS.md) - All encountered issues
+- [docs/setup/TRY_1_SETUP_HICCUPS.md](docs/setup/TRY_1_SETUP_HICCUPS.md) - Additional troubleshooting
 - [terraform/README.md](terraform/README.md) - Terraform-specific issues
 
 ## 🤝 Contributing
