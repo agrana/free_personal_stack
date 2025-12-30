@@ -16,6 +16,8 @@ jobs:
     name: Run Database Migrations
     runs-on: ubuntu-latest
     environment: production
+    # Skip on initial commit (repository creation from template), but allow manual dispatch
+    if: github.event_name == 'workflow_dispatch' || github.event.before != '0000000000000000000000000000000000000000'
     
     steps:
       - name: Checkout code
