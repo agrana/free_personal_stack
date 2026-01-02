@@ -6,13 +6,13 @@ A complete, production-ready infrastructure template for personal projects using
 
 1. **Use this template** - Click "Use this template" on GitHub
 2. **Create accounts** - Sign up for Cloudflare, Vercel, and Supabase
-3. **Configure secrets** - A setup issue will be created automatically (or see [MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md))
+3. **Configure secrets** - A setup issue will be created automatically (or see [docs/ci-cd/MINIMUM_SECRETS.md](docs/ci-cd/MINIMUM_SECRETS.md))
 4. **Run Terraform** - Go to Actions → Terraform Infrastructure → Run workflow
 5. **Deploy your app!**
 
 For detailed setup instructions, see:
 - [Blog Series](00_Manifesto.md) - Start here for the full journey
-- [Terraform with GitHub Actions](.github/TERRAFORM_SETUP.md) - Complete automation guide
+- [Terraform with GitHub Actions](docs/ci-cd/TERRAFORM_SETUP.md) - Complete automation guide
 - [Quick Start Guide](docs/setup/QUICK_START.md) - Fastest path to deployment
 
 ## 📚 Documentation
@@ -27,8 +27,8 @@ For detailed setup instructions, see:
 - **[06_Build_Your_App.md](06_Build_Your_App.md)** - Start building
 
 ### Automation & Infrastructure
-- **[.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md)** - Run Terraform in GitHub Actions
-- **[.github/SECRETS_CHECKLIST.md](.github/SECRETS_CHECKLIST.md)** - Required secrets checklist
+- **[docs/ci-cd/TERRAFORM_SETUP.md](docs/ci-cd/TERRAFORM_SETUP.md)** - Run Terraform in GitHub Actions
+- **[docs/ci-cd/SECRETS_CHECKLIST.md](docs/ci-cd/SECRETS_CHECKLIST.md)** - Required secrets checklist
 - **[docs/setup/SETUP_HICCUPS.md](docs/setup/SETUP_HICCUPS.md)** - Common issues and solutions
 - **[terraform/README.md](terraform/README.md)** - Terraform documentation
 
@@ -75,7 +75,7 @@ Use GitHub Actions for everything:
 2. Run Terraform workflow
 3. Infrastructure is ready!
 
-See [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md) for details.
+See [docs/ci-cd/TERRAFORM_SETUP.md](docs/ci-cd/TERRAFORM_SETUP.md) for details.
 
 ## 🔐 Required API Tokens
 

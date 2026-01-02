@@ -136,7 +136,7 @@ jobs:
               '   - Once secrets are validated, run **Terraform Infrastructure** workflow\n' +
               '   - Start with `plan` command to preview changes\n\n' +
               '## 📚 Documentation\n\n' +
-              'For detailed instructions, see [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md)';
+              'For detailed instructions, see [docs/ci-cd/TERRAFORM_SETUP.md](docs/ci-cd/TERRAFORM_SETUP.md)';
             
             const { data: issue } = await github.rest.issues.create({
               owner: context.repo.owner,

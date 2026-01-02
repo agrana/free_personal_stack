@@ -172,7 +172,7 @@ jobs:
                 '2. Select `plan` command to preview changes\n' +
                 '3. Review the plan, then run `apply` to deploy\n\n' +
                 '## 📚 Need Help?\n\n' +
-                '- See [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md) for detailed instructions\n' +
+                '- See [docs/ci-cd/TERRAFORM_SETUP.md](docs/ci-cd/TERRAFORM_SETUP.md) for detailed instructions\n' +
                 '- Check workflow runs in Actions tab for validation results\n' +
                 '- All secrets must be in the `production` environment\n\n' +
                 '---\n\n' +

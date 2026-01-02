@@ -208,7 +208,7 @@ jobs:
           - \`APP_URL\` - From project name
           - \`SITE_URL\` - From domain name
           
-          See [.github/MINIMUM_SECRETS.md](.github/MINIMUM_SECRETS.md) for details.
+          See [docs/ci-cd/MINIMUM_SECRETS.md](docs/ci-cd/MINIMUM_SECRETS.md) for details.
           EOF
           
           echo "📝 Created SECRETS_TEMPLATE.md"

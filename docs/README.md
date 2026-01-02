@@ -22,6 +22,18 @@ Development tools and practices:
 - `PRE_COMMIT_SETUP.md` - Pre-commit hooks configuration
 - `LINTING_NOTE.md` - Linting configuration and notes
 
+### `/docs/ci-cd/`
+CI/CD automation and GitHub Actions documentation:
+- `TERRAFORM_SETUP.md` - Complete Terraform setup with GitHub Actions
+- `SECRETS_CHECKLIST.md` - Required secrets checklist
+- `MINIMUM_SECRETS.md` - Minimum required secrets guide
+- `STATE_ENCRYPTION_SETUP.md` - Terraform state encryption setup
+- `WORKFLOW_PERMISSIONS.md` - GitHub Actions permissions configuration
+- `VALIDATION.md` - Workflow validation procedures
+- `FLOW_VERIFICATION.md` - Setup flow verification guide
+- `GITHUB_ACTIONS_TERRAFORM.md` - GitHub Actions Terraform guide
+- `MERGE_CHECKLIST.md` - Merge checklist for pull requests
+
 ### `/docs/`
 General documentation:
 - `BLOG_POST_SHORT.md` - Blog post content
@@ -37,9 +49,9 @@ The primary user-facing documentation is in the repository root:
 
 - `terraform/README.md` - Terraform module documentation
 - `terraform/COMPONENTS.md` - Terraform components overview
-- `.github/TERRAFORM_SETUP.md` - GitHub Actions Terraform setup
-- `.github/SECRETS_CHECKLIST.md` - Required secrets checklist
-- `.github/MINIMUM_SECRETS.md` - Minimum required secrets
+- `docs/ci-cd/TERRAFORM_SETUP.md` - GitHub Actions Terraform setup
+- `docs/ci-cd/SECRETS_CHECKLIST.md` - Required secrets checklist
+- `docs/ci-cd/MINIMUM_SECRETS.md` - Minimum required secrets
 
 ## 🎯 For AI Coding Assistants
 
@@ -48,6 +60,7 @@ When analyzing this repository, refer to:
 2. **Blog series (00-06)** - User journey and setup process
 3. **docs/architecture/** - System design and architecture
 4. **docs/setup/** - Setup procedures and troubleshooting
-5. **.github/** - GitHub Actions workflows and configuration
-6. **terraform/** - Infrastructure as code documentation
+5. **docs/ci-cd/** - CI/CD automation and GitHub Actions documentation
+6. **.github/workflows/** - GitHub Actions workflow files
+7. **terraform/** - Infrastructure as code documentation
 

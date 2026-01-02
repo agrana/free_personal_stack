@@ -11,9 +11,9 @@ Deploy everything directly from GitHub. No local setup required.
 **No local setup required!** Run Terraform entirely through GitHub Actions.
 
 1. **Set up GitHub Environments and Secrets**
-   - See [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md) for complete instructions
+   - See [docs/ci-cd/TERRAFORM_SETUP.md](docs/ci-cd/TERRAFORM_SETUP.md) for complete instructions
    - Add all required secrets to GitHub Environments
-   - See [.github/SECRETS_CHECKLIST.md](.github/SECRETS_CHECKLIST.md) for the full list
+   - See [docs/ci-cd/SECRETS_CHECKLIST.md](docs/ci-cd/SECRETS_CHECKLIST.md) for the full list
 
 2. **Run Terraform Workflow**
    - Go to **Actions** → **Terraform Infrastructure**
@@ -27,7 +27,7 @@ Deploy everything directly from GitHub. No local setup required.
 - ✅ Automatic plans on PRs
 - ✅ Protection rules for production deployments
 
-See [.github/TERRAFORM_SETUP.md](.github/TERRAFORM_SETUP.md) for detailed setup instructions.
+See [docs/ci-cd/TERRAFORM_SETUP.md](docs/ci-cd/TERRAFORM_SETUP.md) for detailed setup instructions.
 
 ## Step 2: Trigger First Deployment
 
