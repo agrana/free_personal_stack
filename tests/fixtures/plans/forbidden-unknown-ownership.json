@@ -1,0 +1,61 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.0",
+  "resource_changes": [
+    {
+      "address": "module.vercel.vercel_project.main",
+      "mode": "managed",
+      "type": "vercel_project",
+      "name": "main",
+      "provider_name": "registry.terraform.io/vercel/vercel",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "framework": "nextjs"
+        },
+        "after_unknown": {
+          "id": true,
+          "name": true
+        },
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "module.vercel.vercel_project_domain.main",
+      "mode": "managed",
+      "type": "vercel_project_domain",
+      "name": "main",
+      "provider_name": "registry.terraform.io/vercel/vercel",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {},
+        "after_unknown": {
+          "id": true,
+          "project_id": true,
+          "domain": true
+        },
+        "after_sensitive": {}
+      }
+    }
+  ],
+  "configuration": {
+    "root_module": {
+      "module_calls": {
+        "vercel": {
+          "module": {
+            "resources": [
+              {
+                "address": "vercel_project.main",
+                "type": "vercel_project",
+                "name": "main",
+                "provider_config_key": "vercel"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

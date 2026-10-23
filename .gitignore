@@ -12,6 +12,11 @@ terraform.tfstate*
 .env.test.local
 .env.production.local
 
+# Python bootstrap venv (see requirements-bootstrap.txt)
+.venv/
+__pycache__/
+*.py[cod]
+
 # Dependencies
 node_modules/
 npm-debug.log*

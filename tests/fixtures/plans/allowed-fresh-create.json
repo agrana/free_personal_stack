@@ -1,0 +1,116 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.0",
+  "resource_changes": [
+    {
+      "address": "module.vercel.vercel_project.main",
+      "mode": "managed",
+      "type": "vercel_project",
+      "name": "main",
+      "provider_name": "registry.terraform.io/vercel/vercel",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "name": "agent-arena",
+          "framework": "nextjs",
+          "team_id": "team_example"
+        },
+        "after_unknown": {
+          "id": true
+        },
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "module.vercel.vercel_project_domain.main",
+      "mode": "managed",
+      "type": "vercel_project_domain",
+      "name": "main",
+      "provider_name": "registry.terraform.io/vercel/vercel",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "domain": "arena.example.com"
+        },
+        "after_unknown": {
+          "project_id": true,
+          "id": true
+        },
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "module.vercel.vercel_project_environment_variable.env_vars[\"NEXT_PUBLIC_SITE_URL\"]",
+      "mode": "managed",
+      "type": "vercel_project_environment_variable",
+      "name": "env_vars",
+      "index": "NEXT_PUBLIC_SITE_URL",
+      "provider_name": "registry.terraform.io/vercel/vercel",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "key": "NEXT_PUBLIC_SITE_URL",
+          "value": "https://arena.example.com",
+          "target": ["production", "preview", "development"],
+          "team_id": "team_example"
+        },
+        "after_unknown": {
+          "id": true,
+          "project_id": true
+        },
+        "after_sensitive": {
+          "value": true
+        }
+      }
+    }
+  ],
+  "configuration": {
+    "root_module": {
+      "module_calls": {
+        "vercel": {
+          "module": {
+            "resources": [
+              {
+                "address": "vercel_project.main",
+                "type": "vercel_project",
+                "name": "main",
+                "provider_config_key": "vercel",
+                "expressions": {
+                  "name": { "constant_value": "agent-arena" },
+                  "team_id": { "constant_value": "team_example" }
+                }
+              },
+              {
+                "address": "vercel_project_domain.main",
+                "type": "vercel_project_domain",
+                "name": "main",
+                "provider_config_key": "vercel",
+                "expressions": {
+                  "domain": { "constant_value": "arena.example.com" },
+                  "project_id": {
+                    "references": ["vercel_project.main.id", "vercel_project.main"]
+                  }
+                }
+              },
+              {
+                "address": "vercel_project_environment_variable.env_vars",
+                "type": "vercel_project_environment_variable",
+                "name": "env_vars",
+                "provider_config_key": "vercel",
+                "expressions": {
+                  "project_id": {
+                    "references": ["vercel_project.main.id", "vercel_project.main"]
+                  },
+                  "team_id": { "constant_value": "team_example" }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

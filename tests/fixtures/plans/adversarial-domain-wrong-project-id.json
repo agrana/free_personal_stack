@@ -1,0 +1,27 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.0",
+  "resource_changes": [
+    {
+      "address": "module.vercel.vercel_project_domain.main",
+      "mode": "managed",
+      "type": "vercel_project_domain",
+      "name": "main",
+      "provider_name": "registry.terraform.io/vercel/vercel",
+      "change": {
+        "actions": ["no-op"],
+        "before": {
+          "domain": "arena.example.com",
+          "project_id": "prj_other_team"
+        },
+        "after": {
+          "domain": "arena.example.com",
+          "project_id": "prj_other_team"
+        },
+        "after_unknown": {},
+        "after_sensitive": {}
+      }
+    }
+  ],
+  "configuration": { "root_module": {} }
+}

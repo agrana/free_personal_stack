@@ -1,17 +1,6 @@
 output "dns_records" {
-  description = "Created DNS records"
+  description = "Approved hostname DNS record only (APP-002)"
   value = {
-    root = cloudflare_record.root.hostname
-    www  = cloudflare_record.www.hostname
-    api  = cloudflare_record.api.hostname
+    app = cloudflare_record.app.hostname
   }
 }
-
-# Page rules outputs temporarily disabled
-# output "page_rules" {
-#   description = "Created page rules"
-#   value = {
-#     cache_static_assets = cloudflare_page_rule.cache_static_assets.id
-#     security_headers    = cloudflare_page_rule.security_headers.id
-#   }
-# }

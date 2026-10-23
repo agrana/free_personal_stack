@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/app.config.schema.json",
+  "title": "Agent Arena reusable app configuration (non-secret)",
+  "description": "Closed-field, non-secret app bootstrap configuration for APP-001. Values are metadata and secret alias NAMES only — never credentials.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "app",
+    "repository",
+    "hostname",
+    "database",
+    "deployment",
+    "dns",
+    "secretAliases",
+    "localConflictInventory",
+    "externalVerification"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Configuration contract version. Only 1 is supported in APP-001."
+    },
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug"],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "Lowercase app slug used for identity and naming.",
+          "pattern": "^[a-z][a-z0-9-]{1,62}$"
+        }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "name"],
+      "properties": {
+        "owner": {
+          "type": "string",
+          "description": "Git forge owner/org (metadata only; ownership is not verified here).",
+          "pattern": "^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Repository name (metadata only).",
+          "pattern": "^[a-zA-Z0-9._-]{1,100}$"
+        }
+      }
+    },
+    "hostname": {
+      "type": "string",
+      "description": "FQDN hostname only — no scheme, path, port, or wildcard.",
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$"
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "namespace"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "const": "existing-project-shared",
+          "description": "Must reuse the single existing Supabase project/database. Create/delete of the shared DB is out of scope and forbidden."
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Per-app Postgres schema/namespace inside the shared database. Must not be reserved or shared.",
+          "pattern": "^[a-z][a-z0-9_]{1,62}$"
+        }
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "stateKey"],
+      "properties": {
+        "identity": {
+          "type": "string",
+          "description": "Per-app deployment identity (e.g. separate Vercel project name key).",
+          "pattern": "^[a-z][a-z0-9-]{1,62}$"
+        },
+        "stateKey": {
+          "type": "string",
+          "description": "Isolated infrastructure state key for this app only.",
+          "pattern": "^[a-z][a-z0-9-]{1,62}$"
+        }
+      }
+    },
+    "dns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["choice"],
+      "properties": {
+        "choice": {
+          "type": "string",
+          "enum": ["unresolved", "cloudflare", "cloudfront"],
+          "description": "Manual DNS choice. unresolved is valid for draft configs but fails deployment-readiness preflight."
+        }
+      }
+    },
+    "secretAliases": {
+      "type": "object",
+      "description": "Map of required secret slots to uppercase alias NAMES (not values). Aliases point at the approved original secure source used by SavedTube; never embed credentials here.",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "required": [
+        "CLOUDFLARE_API_TOKEN",
+        "VERCEL_API_TOKEN",
+        "SUPABASE_URL",
+        "SUPABASE_ANON_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SUPABASE_ACCESS_TOKEN",
+        "TERRAFORM_STATE_PASSWORD"
+      ],
+      "properties": {
+        "CLOUDFLARE_API_TOKEN": { "$ref": "#/$defs/secretAliasName" },
+        "VERCEL_API_TOKEN": { "$ref": "#/$defs/secretAliasName" },
+        "SUPABASE_URL": { "$ref": "#/$defs/secretAliasName" },
+        "SUPABASE_ANON_KEY": { "$ref": "#/$defs/secretAliasName" },
+        "SUPABASE_SERVICE_ROLE_KEY": { "$ref": "#/$defs/secretAliasName" },
+        "SUPABASE_ACCESS_TOKEN": { "$ref": "#/$defs/secretAliasName" },
+        "TERRAFORM_STATE_PASSWORD": { "$ref": "#/$defs/secretAliasName" },
+        "SUPABASE_PROJECT_ID": { "$ref": "#/$defs/secretAliasName" },
+        "DOMAIN_NAME": { "$ref": "#/$defs/secretAliasName" },
+        "SUPABASE_DATABASE_PASSWORD": { "$ref": "#/$defs/secretAliasName" },
+        "GOOGLE_CLIENT_ID": { "$ref": "#/$defs/secretAliasName" },
+        "GOOGLE_CLIENT_SECRET": { "$ref": "#/$defs/secretAliasName" },
+        "SUPPORT_EMAIL_DESTINATION": { "$ref": "#/$defs/secretAliasName" },
+        "CONTACT_EMAIL_DESTINATION": { "$ref": "#/$defs/secretAliasName" },
+        "VERCEL_TEAM_ID": { "$ref": "#/$defs/secretAliasName" },
+        "CLOUDFLARE_ACCOUNT_ID": { "$ref": "#/$defs/secretAliasName" }
+      }
+    },
+    "localConflictInventory": {
+      "type": "object",
+      "description": "Locally supplied known identifiers for OTHER apps. Live remote discovery is separate and remains pending until externalVerification.liveConflictDiscovery is complete.",
+      "additionalProperties": false,
+      "required": [
+        "slugs",
+        "namespaces",
+        "hostnames",
+        "deploymentIdentities",
+        "stateKeys"
+      ],
+      "properties": {
+        "slugs": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+          "uniqueItems": true
+        },
+        "namespaces": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,62}$" },
+          "uniqueItems": true
+        },
+        "hostnames": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$"
+          },
+          "uniqueItems": true
+        },
+        "deploymentIdentities": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+          "uniqueItems": true
+        },
+        "stateKeys": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "externalVerification": {
+      "type": "object",
+      "description": "Live verification status. Metadata validation must not be conflated with verified remote ownership. Unverified/pending values block deployment-readiness.",
+      "additionalProperties": false,
+      "required": [
+        "accountPermissions",
+        "sharedDatabaseGuard",
+        "secretSource",
+        "liveConflictDiscovery"
+      ],
+      "properties": {
+        "accountPermissions": {
+          "type": "string",
+          "enum": ["unverified", "verified"]
+        },
+        "sharedDatabaseGuard": {
+          "type": "string",
+          "enum": ["unverified", "verified"]
+        },
+        "secretSource": {
+          "type": "string",
+          "enum": ["unverified", "verified"]
+        },
+        "liveConflictDiscovery": {
+          "type": "string",
+          "enum": ["pending", "complete"]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "secretAliasName": {
+      "type": "string",
+      "description": "Uppercase alias name only (A-Z, 0-9, underscore). Never a credential value.",
+      "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.0",
+  "resource_changes": [
+    {
+      "address": "module.supabase.null_resource.delete_supabase_project[0]",
+      "mode": "managed",
+      "type": "null_resource",
+      "name": "delete_supabase_project",
+      "index": 0,
+      "provider_name": "registry.terraform.io/hashicorp/null",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "triggers": {
+            "project_id": "sharedref",
+            "access_token": "REDACTED_SHOULD_NOT_APPEAR_IN_LOGS"
+          }
+        },
+        "after_unknown": {
+          "id": true
+        },
+        "after_sensitive": {
+          "triggers": {
+            "access_token": true
+          }
+        }
+      }
+    }
+  ],
+  "configuration": {
+    "root_module": {
+      "module_calls": {
+        "supabase": {
+          "module": {
+            "resources": [
+              {
+                "address": "null_resource.delete_supabase_project",
+                "type": "null_resource",
+                "name": "delete_supabase_project",
+                "provider_config_key": "null",
+                "provisioners": [
+                  {
+                    "type": "local-exec"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

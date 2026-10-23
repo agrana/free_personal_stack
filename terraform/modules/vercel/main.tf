@@ -7,7 +7,7 @@ terraform {
   }
 }
 
-# Create or reference Vercel project
+# Per-app Vercel project. Protected against accidental terraform destroy (APP-002).
 resource "vercel_project" "main" {
   name      = var.project_name
   team_id   = var.team_id != "" ? var.team_id : null
@@ -17,15 +17,18 @@ resource "vercel_project" "main" {
     type = "github"
     repo = var.github_repo
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
-# Custom Domain
 resource "vercel_project_domain" "main" {
   project_id = vercel_project.main.id
   domain     = var.domain_name
 
-  # Import existing domain - ignore changes to match current state
   lifecycle {
+    prevent_destroy = true
     ignore_changes = [
       redirect,
       redirect_status_code
@@ -33,7 +36,6 @@ resource "vercel_project_domain" "main" {
   }
 }
 
-# Environment Variables
 resource "vercel_project_environment_variable" "env_vars" {
   for_each = var.environment_variables
 

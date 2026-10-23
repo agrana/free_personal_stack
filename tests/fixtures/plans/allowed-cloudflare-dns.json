@@ -1,0 +1,80 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.0",
+  "resource_changes": [
+    {
+      "address": "module.vercel.vercel_project.main",
+      "mode": "managed",
+      "type": "vercel_project",
+      "name": "main",
+      "provider_name": "registry.terraform.io/vercel/vercel",
+      "change": {
+        "actions": ["no-op"],
+        "before": {
+          "name": "agent-arena",
+          "id": "prj_example",
+          "team_id": "team_example"
+        },
+        "after": {
+          "name": "agent-arena",
+          "id": "prj_example",
+          "team_id": "team_example"
+        },
+        "after_unknown": {},
+        "after_sensitive": {}
+      }
+    },
+    {
+      "address": "module.dns[0].cloudflare_record.app",
+      "mode": "managed",
+      "type": "cloudflare_record",
+      "name": "app",
+      "provider_name": "registry.terraform.io/cloudflare/cloudflare",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "zone_id": "zone_example",
+          "name": "arena",
+          "type": "CNAME",
+          "content": "agent-arena.vercel.app",
+          "proxied": true
+        },
+        "after_unknown": {
+          "id": true
+        },
+        "after_sensitive": {}
+      }
+    }
+  ],
+  "configuration": {
+    "root_module": {
+      "module_calls": {
+        "vercel": {
+          "module": {
+            "resources": [
+              {
+                "address": "vercel_project.main",
+                "type": "vercel_project",
+                "name": "main",
+                "provider_config_key": "vercel"
+              }
+            ]
+          }
+        },
+        "dns": {
+          "module": {
+            "resources": [
+              {
+                "address": "cloudflare_record.app",
+                "type": "cloudflare_record",
+                "name": "app",
+                "provider_config_key": "cloudflare"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
