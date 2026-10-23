@@ -1,44 +1,34 @@
-# Copy this file to terraform.tfvars and fill in your values
+# APP-002 safe defaults for a single existing shared Supabase project.
+# Copy to terraform.tfvars (gitignored). Do not commit secrets.
 
-# Domain configuration
-domain_name = "yourdomain.com"  # Your domain name
-app_url     = "yourproject.vercel.app"  # Your Vercel app URL
+# Required per-app ownership (no shared reusable defaults)
+approved_hostname     = "arena.example.com"
+vercel_project_name   = "agent-arena"
+deployment_state_key  = "agent-arena"
+github_repo           = "example-owner/agent-arena"
 
-# Email forwarding configuration (optional - requires account-level Cloudflare API token permissions)
-# Virtual addresses (support@domain, contact@domain, hello@domain) will forward to these REAL email addresses
-# If your token only has zone-level permissions, set enable_email_routing = false
-support_email_destination = "your-real-email@gmail.com"  # Real email where support@domain forwards to
-contact_email_destination = "your-real-email@gmail.com"  # Real email where contact@domain and hello@domain forward to
-# enable_email_routing = false  # Set to false to disable email routing module entirely
-# manage_email_routing_settings = false  # Set to false if you only have zone-level token permissions (settings require account-level, but routing rules can still be managed)
+# DNS: default disabled / fail closed. CloudFront is NOT implemented here.
+enable_dns   = false
+dns_provider = "unresolved"
+# When enabling Cloudflare DNS later:
+# enable_dns            = true
+# dns_provider          = "cloudflare"
+# cloudflare_zone_name  = "example.com"  # existing shared zone (data lookup only)
+# app_url               = "agent-arena.vercel.app"
+# cloudflare_api_token  = "..."
 
-# Cloudflare API token (get from https://dash.cloudflare.com/profile/api-tokens)
-# Required permissions: Zone:Zone:Read, Zone:DNS:Edit, Zone:Zone:Edit (if creating zone), Zone:Email Routing:Read, Zone:Email Routing:Edit
-cloudflare_api_token = "your-cloudflare-api-token"
-# cloudflare_account_id = "your-account-id"  # Optional for personal accounts, required for team accounts
-# Find account_id in Cloudflare Dashboard → Right sidebar shows "Account ID"
-# create_cloudflare_zone = false  # Set to true if zone doesn't exist and should be created, false to use existing zone
+# Shared zone / mail: must stay off
+create_cloudflare_zone = false
+enable_email_routing   = false
 
-# Vercel Configuration
-vercel_api_token = "your-vercel-api-token"  # Get from https://vercel.com/account/tokens
-vercel_team_id   = ""  # Leave empty for personal account, or add team ID
-vercel_project_name = "your-project-name"  # Name of your Vercel project
-github_repo      = "your-username/your-repo"  # Your GitHub repository
-
-# Supabase Configuration (optional - remove if not using Supabase)
-supabase_url                = "https://your-project.supabase.co"
+# Shared Supabase project — reference only; never delete via Terraform
+supabase_url               = "https://your-shared-project.supabase.co"
 supabase_anon_key          = "your-supabase-anon-key"
 supabase_service_role_key  = "your-supabase-service-role-key"
-supabase_access_token      = "your-supabase-access-token"  # Get from https://supabase.com/dashboard/account/tokens
-supabase_project_id        = "your-supabase-project-id"  # Your Supabase project ID
-# enable_supabase_project_deletion = true  # Default: true. Set to false to prevent terraform destroy from deleting the Supabase project
+supabase_project_id        = "your-shared-project-id"
+enable_supabase_project_deletion = false
 
-# Site URL (optional - defaults to https://{domain_name})
-site_url = "https://yourdomain.com"
+vercel_api_token = "your-vercel-api-token"
+vercel_team_id   = ""
 
-# Google OAuth Configuration (optional - remove if not using Google OAuth)
-google_client_id     = "your-google-client-id"
-google_client_secret = "your-google-client-secret"
-
-# NextAuth Configuration (optional - remove if not using NextAuth)
-nextauth_secret = "your-nextauth-secret"
+site_url = "https://arena.example.com"

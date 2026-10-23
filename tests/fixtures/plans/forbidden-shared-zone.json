@@ -1,0 +1,38 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.0",
+  "resource_changes": [
+    {
+      "address": "cloudflare_zone.new[0]",
+      "mode": "managed",
+      "type": "cloudflare_zone",
+      "name": "new",
+      "index": 0,
+      "provider_name": "registry.terraform.io/cloudflare/cloudflare",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "zone": "example.com",
+          "plan": "free"
+        },
+        "after_unknown": {
+          "id": true
+        },
+        "after_sensitive": {}
+      }
+    }
+  ],
+  "configuration": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "cloudflare_zone.new",
+          "type": "cloudflare_zone",
+          "name": "new",
+          "provider_config_key": "cloudflare"
+        }
+      ]
+    }
+  }
+}

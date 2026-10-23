@@ -1,0 +1,44 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.0",
+  "resource_changes": [
+    {
+      "address": "module.dns[0].cloudflare_record.app",
+      "mode": "managed",
+      "type": "cloudflare_record",
+      "name": "app",
+      "provider_name": "registry.terraform.io/cloudflare/cloudflare",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "zone_id": "zone_example",
+          "name": "evil",
+          "type": "CNAME",
+          "content": "attacker.example.net",
+          "proxied": true
+        },
+        "after_unknown": { "id": true },
+        "after_sensitive": {}
+      }
+    }
+  ],
+  "configuration": {
+    "root_module": {
+      "module_calls": {
+        "dns": {
+          "module": {
+            "resources": [
+              {
+                "address": "cloudflare_record.app",
+                "type": "cloudflare_record",
+                "name": "app",
+                "provider_config_key": "cloudflare"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,23 +1,24 @@
-# Local variables for common values
+# APP-002: template safe for a single existing shared Supabase project.
+# Each app owns only its distinct Vercel project + approved hostname.
+# Shared DNS zone, mail routing, and Supabase project lifecycle are out of scope.
+
 locals {
-  domain_name = var.domain_name
-  # Extract parent zone from domain (e.g., "fpt.alfonsograna.com" -> "alfonsograna.com")
-  parent_zone = join(".", slice(split(".", var.domain_name), length(split(".", var.domain_name)) - 2, length(split(".", var.domain_name))))
-  # Use created zone ID if creating, otherwise use existing zone ID
-  zone_id = var.create_cloudflare_zone ? cloudflare_zone.new[0].id : data.cloudflare_zone.existing[0].id
-
-  # Infer vercel_project_name from domain_name if not provided
-  # Remove dots, replace with hyphens, lowercase
-  sanitized_domain    = replace(replace(lower(var.domain_name), ".", "-"), "_", "-")
-  vercel_project_name = var.vercel_project_name != "" ? var.vercel_project_name : local.sanitized_domain
-
-  # Infer app_url from vercel_project_name if not provided
-  app_url = var.app_url != "" ? var.app_url : "${local.vercel_project_name}.vercel.app"
-
-  # Infer github_repo - should be provided but has fallback
+  approved_hostname = var.domain_name != "" ? var.domain_name : var.approved_hostname
+  parent_zone = (
+    var.cloudflare_zone_name != "" ? var.cloudflare_zone_name : join(
+      ".",
+      slice(
+        split(".", local.approved_hostname),
+        length(split(".", local.approved_hostname)) - 2,
+        length(split(".", local.approved_hostname))
+      )
+    )
+  )
+  dns_enabled = var.enable_dns && var.dns_provider == "cloudflare"
+  app_url     = var.app_url != "" ? var.app_url : "${var.vercel_project_name}.vercel.app"
   github_repo = var.github_repo != "" ? var.github_repo : "unknown/unknown"
+  site_url    = var.site_url != "" ? var.site_url : "https://${local.approved_hostname}"
 
-  # Environment variables for Vercel
   vercel_env_vars = {
     NEXT_PUBLIC_SUPABASE_URL = {
       value  = var.supabase_url
@@ -32,71 +33,97 @@ locals {
       target = ["production", "preview", "development"]
     }
     NEXT_PUBLIC_SITE_URL = {
-      value  = var.site_url != "" ? var.site_url : "https://${var.domain_name}"
+      value  = local.site_url
       target = ["production", "preview", "development"]
     }
   }
 }
 
-# Reference existing Cloudflare zone (parent domain)
-# For subdomains, use the parent zone (e.g., for fpt.example.com, use example.com zone)
-# For root domains, use the domain itself as the zone
+check "dns_fail_closed" {
+  assert {
+    condition     = !var.enable_dns || var.dns_provider == "cloudflare"
+    error_message = "APP-002: enable_dns requires dns_provider=cloudflare. unresolved fails closed; cloudfront is not implemented in this template (do not pretend Cloudflare covers it)."
+  }
+}
+
+check "no_shared_zone_ownership" {
+  assert {
+    condition     = var.create_cloudflare_zone == false
+    error_message = "APP-002: apps must not create or own the shared DNS zone."
+  }
+}
+
+check "no_supabase_project_deletion" {
+  assert {
+    condition     = var.enable_supabase_project_deletion == false
+    error_message = "APP-002: shared Supabase project deletion is forbidden."
+  }
+}
+
+check "per_app_state_key_present" {
+  assert {
+    condition     = length(var.deployment_state_key) > 0
+    error_message = "APP-002: deployment_state_key is required; supply a unique per-app key."
+  }
+}
+
+# Existing zone lookup only — never create a zone.
 data "cloudflare_zone" "existing" {
-  count = var.create_cloudflare_zone ? 0 : 1
+  count = local.dns_enabled ? 1 : 0
   name  = local.parent_zone
 }
 
-# Create new Cloudflare zone if it doesn't exist
-resource "cloudflare_zone" "new" {
-  count      = var.create_cloudflare_zone ? 1 : 0
-  zone       = local.parent_zone
-  plan       = "free"
-  account_id = var.cloudflare_account_id != "" ? var.cloudflare_account_id : null
-}
-
-# DNS Module
 module "dns" {
   source = "./modules/dns"
+  count  = local.dns_enabled ? 1 : 0
 
-  zone_id     = local.zone_id
-  domain_name = local.domain_name
+  zone_id     = data.cloudflare_zone.existing[0].id
+  domain_name = local.approved_hostname
   parent_zone = local.parent_zone
   app_url     = local.app_url
 }
 
-# Email Routing Module (optional - requires account-level API token permissions)
+# Mail routing disabled by default; module retained but not selected unless explicitly enabled.
+# Shared mail routing is not app-owned (APP-002). Prefer leave enable_email_routing=false.
 module "email_routing" {
   source = "./modules/email_routing"
-  count  = var.enable_email_routing && var.support_email_destination != "" && var.contact_email_destination != "" ? 1 : 0
+  # Shared mail routing is not app-owned; keep disabled unless explicitly forced with DNS.
+  count = var.enable_email_routing && local.dns_enabled && var.support_email_destination != "" && var.contact_email_destination != "" ? 1 : 0
 
-  zone_id                       = local.zone_id
-  domain_name                   = local.domain_name
+  zone_id                       = data.cloudflare_zone.existing[0].id
+  domain_name                   = local.approved_hostname
   support_email_destination     = var.support_email_destination
   contact_email_destination     = var.contact_email_destination
   manage_email_routing_settings = var.manage_email_routing_settings
 }
 
-# Vercel Module
 module "vercel" {
   source = "./modules/vercel"
 
-  project_name          = local.vercel_project_name
-  domain_name           = local.domain_name
+  project_name          = var.vercel_project_name
+  domain_name           = local.approved_hostname
   github_repo           = local.github_repo
   team_id               = var.vercel_team_id
   environment_variables = local.vercel_env_vars
 }
 
-# Supabase Module
+# Shared Supabase project — reference/outputs only.
 module "supabase" {
   source = "./modules/supabase"
 
-  project_id              = var.supabase_project_id
-  supabase_access_token   = var.supabase_access_token
-  enable_project_deletion = var.enable_supabase_project_deletion
+  project_id = var.supabase_project_id
 }
 
-# Outputs
+output "deployment_state_key" {
+  description = "Per-app state key (must be unique; used by workflows/backends)"
+  value       = var.deployment_state_key
+}
+
+output "approved_hostname" {
+  description = "Explicitly approved hostname for this app"
+  value       = local.approved_hostname
+}
+
 output "vercel_project_url" {
   description = "The URL of the Vercel project"
   value       = module.vercel.project_url
@@ -107,14 +134,17 @@ output "vercel_domain_url" {
   value       = module.vercel.domain_url
 }
 
-# Supabase Outputs
 output "supabase_project_url" {
-  description = "The URL of the Supabase project"
+  description = "The URL of the shared Supabase project (reference)"
   value       = module.supabase.project_url
 }
 
-
 output "supabase_api_url" {
-  description = "The API URL of the Supabase project"
+  description = "The API URL of the shared Supabase project (reference)"
   value       = module.supabase.api_url
+}
+
+output "dns_enabled" {
+  description = "Whether DNS management is enabled for this app"
+  value       = local.dns_enabled
 }

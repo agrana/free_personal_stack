@@ -1,0 +1,46 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.0",
+  "resource_changes": [
+    {
+      "address": "module.vercel.vercel_project.main",
+      "mode": "managed",
+      "type": "vercel_project",
+      "name": "main",
+      "provider_name": "registry.terraform.io/vercel/vercel",
+      "change": {
+        "actions": ["no-op"],
+        "before": {
+          "name": "other-stolen-app",
+          "id": "prj_stolen",
+          "team_id": "team_example"
+        },
+        "after": {
+          "name": "other-stolen-app",
+          "id": "prj_stolen",
+          "team_id": "team_example"
+        },
+        "after_unknown": {},
+        "after_sensitive": {}
+      }
+    }
+  ],
+  "configuration": {
+    "root_module": {
+      "module_calls": {
+        "vercel": {
+          "module": {
+            "resources": [
+              {
+                "address": "vercel_project.main",
+                "type": "vercel_project",
+                "name": "main",
+                "provider_config_key": "vercel"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

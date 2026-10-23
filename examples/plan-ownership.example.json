@@ -1,0 +1,21 @@
+{
+  "hostname": "arena.example.com",
+  "deploymentIdentity": "agent-arena",
+  "stateKey": "agent-arena",
+  "dnsChoice": "unresolved",
+  "vercel": {
+    "teamId": "team_example",
+    "projectId": "prj_example"
+  },
+  "cloudflare": null,
+  "allowedResourceTypes": [
+    "vercel_project",
+    "vercel_project_domain",
+    "vercel_project_environment_variable"
+  ],
+  "resourceBindings": {
+    "module.vercel.vercel_project.main": "vercel_project",
+    "module.vercel.vercel_project_domain.main": "vercel_project_domain",
+    "module.vercel.vercel_project_environment_variable.env_vars[\"NEXT_PUBLIC_SITE_URL\"]": "vercel_project_environment_variable"
+  }
+}

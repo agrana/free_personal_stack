@@ -1,0 +1,44 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.9.0",
+  "resource_changes": [
+    {
+      "address": "module.email_routing[0].cloudflare_email_routing_rule.support",
+      "mode": "managed",
+      "type": "cloudflare_email_routing_rule",
+      "name": "support",
+      "provider_name": "registry.terraform.io/cloudflare/cloudflare",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "name": "Support emails",
+          "enabled": true
+        },
+        "after_unknown": {
+          "id": true,
+          "zone_id": true
+        },
+        "after_sensitive": {}
+      }
+    }
+  ],
+  "configuration": {
+    "root_module": {
+      "module_calls": {
+        "email_routing": {
+          "module": {
+            "resources": [
+              {
+                "address": "cloudflare_email_routing_rule.support",
+                "type": "cloudflare_email_routing_rule",
+                "name": "support",
+                "provider_config_key": "cloudflare"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

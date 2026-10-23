@@ -1,6 +1,8 @@
 # Project Infrastructure
 
-This directory contains Terraform configurations to manage your project's infrastructure, including Cloudflare DNS, email forwarding, Vercel hosting, and other services.
+**APP-002:** This template targets a **single existing shared Supabase project** (reference only). Each app owns only its distinct Vercel project and an explicitly approved hostname. DNS/email/zone defaults are **off** (fail closed). `terraform apply` / destroy entrypoints and automatic DB migrations are **disabled** until APP-005 / APP-003. Existing template users: do **not** apply resource-removal plans against old state without an immutable reviewed plan, ownership guard, and manual state-detachment review — see `docs/bootstrap.md`.
+
+This directory contains Terraform configurations for per-app Vercel wiring plus optional Cloudflare DNS for one approved hostname.
 
 ## Prerequisites
 

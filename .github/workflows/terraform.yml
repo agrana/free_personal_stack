@@ -1,16 +1,20 @@
 name: Terraform Infrastructure
 
+# APP-002: destructive and unguarded mutate paths are disabled.
+# Plan may still run for review. Apply/destroy require APP-005 remote
+# account/permission verification + immutable reviewed plan guard.
+# Do not re-enable apply/destroy until that enforcement exists everywhere
+# legacy workflows could mutate infrastructure.
+
 on:
   workflow_dispatch:
     inputs:
       terraform_command:
-        description: 'Terraform command to run'
+        description: 'Terraform command to run (mutate paths disabled by APP-002)'
         required: true
         type: choice
         options:
           - plan
-          - apply
-          - destroy
         default: plan
   push:
     branches:
@@ -26,34 +30,32 @@ on:
 env:
   TF_VERSION: '1.9.0'
   WORKING_DIRECTORY: 'terraform'
+  # APP-002: legacy apply path safely disabled pending APP-005 plan-guard enforcement
+  APP002_APPLY_DISABLED: 'true'
+  APP002_DESTROY_DISABLED: 'true'
 
 permissions:
   contents: read
-  actions: read  # Required to read artifacts from other workflow runs
+  actions: read
 
 jobs:
   plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-    # Plan runs automatically - configure environment to NOT require approval
-    # Uses environment secrets (TERRAFORM_STATE_PASSWORD must be in environment)
-    # Also runs on workflow_dispatch with terraform_command: plan
-    # Skip on initial commit - setup workflows need to run first
     if: |
       github.event_name == 'pull_request' ||
-      (github.event_name == 'push' && 
-       github.event.before != null && 
-       github.event.before != '' && 
+      (github.event_name == 'push' &&
+       github.event.before != null &&
+       github.event.before != '' &&
        github.event.before != '0000000000000000000000000000000000000000') ||
-      (github.event_name == 'workflow_dispatch' && (github.event.inputs.terraform_command == 'plan' || github.event.inputs.terraform_command == ''))
-    
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_command == 'plan')
+
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIRECTORY }}
 
     env:
-      # Terraform variables from GitHub Secrets
       TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       TF_VAR_vercel_api_token: ${{ secrets.VERCEL_API_TOKEN }}
       TF_VAR_supabase_url: ${{ secrets.SUPABASE_URL }}
@@ -61,19 +63,21 @@ jobs:
       TF_VAR_supabase_service_role_key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       TF_VAR_supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       TF_VAR_supabase_project_id: ${{ steps.validate-secrets.outputs.project_id }}
+      TF_VAR_approved_hostname: ${{ secrets.DOMAIN_NAME }}
       TF_VAR_domain_name: ${{ secrets.DOMAIN_NAME }}
       TF_VAR_app_url: ${{ secrets.APP_URL }}
       TF_VAR_site_url: ${{ secrets.SITE_URL || format('https://{0}', secrets.DOMAIN_NAME) }}
-      TF_VAR_support_email_destination: ${{ secrets.SUPPORT_EMAIL_DESTINATION }}
-      TF_VAR_contact_email_destination: ${{ secrets.CONTACT_EMAIL_DESTINATION }}
       TF_VAR_vercel_project_name: ${{ secrets.VERCEL_PROJECT_NAME }}
+      TF_VAR_deployment_state_key: ${{ secrets.VERCEL_PROJECT_NAME }}
       TF_VAR_github_repo: ${{ secrets.GITHUB_REPO || github.repository }}
       TF_VAR_vercel_team_id: ${{ secrets.VERCEL_TEAM_ID }}
       TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TF_VAR_cloudflare_zone_name: ${{ secrets.CLOUDFLARE_ZONE_NAME }}
-      TF_VAR_enable_email_routing: ${{ secrets.ENABLE_EMAIL_ROUTING || 'true' }}
-      TF_VAR_create_cloudflare_zone: ${{ secrets.CREATE_CLOUDFLARE_ZONE || 'false' }}
-      TF_VAR_enable_supabase_project_deletion: ${{ secrets.ENABLE_SUPABASE_PROJECT_DELETION || 'true' }}
+      TF_VAR_enable_dns: 'false'
+      TF_VAR_dns_provider: 'unresolved'
+      TF_VAR_enable_email_routing: 'false'
+      TF_VAR_create_cloudflare_zone: 'false'
+      TF_VAR_enable_supabase_project_deletion: 'false'
       TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
       TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
 
@@ -83,77 +87,45 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify setup is complete
-        id: check-setup
+      - name: APP-002 safety banner
         run: |
-          # Check if this is still the initial commit
-          COMMIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "1")
-          if [ "$COMMIT_COUNT" -le "1" ]; then
-            echo "::error::This appears to be the initial commit. Setup workflows must run first!"
-            echo "::error::Please wait for the initial-setup workflow to complete."
-            echo "::warning::Terraform requires secrets to be configured first. Check the welcome issue for instructions."
-            exit 1
-          fi
-          
-          echo "✅ Setup appears complete (commit count: $COMMIT_COUNT)"
-          echo "setup_complete=true" >> $GITHUB_OUTPUT
+          echo "## APP-002 infrastructure guard" >> $GITHUB_STEP_SUMMARY
+          echo "Apply and destroy are disabled until APP-005 enforces remote verification + immutable plan guard." >> $GITHUB_STEP_SUMMARY
+          echo "DNS/email/zone defaults are fail-closed. Shared Supabase project is reference-only." >> $GITHUB_STEP_SUMMARY
 
       - name: Validate required secrets
         id: validate-secrets
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
+          VERCEL_PROJECT_NAME: ${{ secrets.VERCEL_PROJECT_NAME }}
           TERRAFORM_STATE_PASSWORD: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
         run: |
-          echo "## 🔍 Validating Required Secrets" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
           missing_secrets=()
-          
-          # Extract project ID from SUPABASE_URL
           if [ -n "$SUPABASE_URL" ]; then
             EXTRACTED_PROJECT_ID=$(echo "$SUPABASE_URL" | sed -E 's|https?://([^.]+)\.supabase\.co.*|\1|')
             if [ -n "$EXTRACTED_PROJECT_ID" ] && [ "$EXTRACTED_PROJECT_ID" != "$SUPABASE_URL" ]; then
               echo "project_id=$EXTRACTED_PROJECT_ID" >> $GITHUB_OUTPUT
-              echo "✅ Extracted project ID from SUPABASE_URL: \`$EXTRACTED_PROJECT_ID\`" >> $GITHUB_STEP_SUMMARY
             else
-              missing_secrets+=("SUPABASE_URL (invalid format - must be https://xxxxx.supabase.co)")
+              missing_secrets+=("SUPABASE_URL (invalid format)")
             fi
           else
             missing_secrets+=("SUPABASE_URL")
           fi
-          
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then missing_secrets+=("CLOUDFLARE_API_TOKEN"); fi
           if [ -z "$VERCEL_API_TOKEN" ]; then missing_secrets+=("VERCEL_API_TOKEN"); fi
           if [ -z "$SUPABASE_ANON_KEY" ]; then missing_secrets+=("SUPABASE_ANON_KEY"); fi
           if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then missing_secrets+=("SUPABASE_SERVICE_ROLE_KEY"); fi
           if [ -z "$DOMAIN_NAME" ]; then missing_secrets+=("DOMAIN_NAME"); fi
+          if [ -z "$VERCEL_PROJECT_NAME" ]; then missing_secrets+=("VERCEL_PROJECT_NAME"); fi
           if [ -z "$TERRAFORM_STATE_PASSWORD" ]; then missing_secrets+=("TERRAFORM_STATE_PASSWORD"); fi
-          
-          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then missing_secrets+=("SUPABASE_ACCESS_TOKEN"); fi
-          
           if [ ${#missing_secrets[@]} -gt 0 ]; then
-            echo "::error title=Missing Required Secrets::${#missing_secrets[@]} required secret(s) are missing" >> $GITHUB_STEP_SUMMARY
-            echo "❌ Missing required secrets (${#missing_secrets[@]}):" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            for secret in "${missing_secrets[@]}"; do
-              echo "- \`$secret\`" >> $GITHUB_STEP_SUMMARY
-            done
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### How to Fix:" >> $GITHUB_STEP_SUMMARY
-            echo "1. Go to **Settings** → **Environments** → **production**" >> $GITHUB_STEP_SUMMARY
-            echo "2. Add the missing secrets listed above" >> $GITHUB_STEP_SUMMARY
-            echo "3. Check the welcome issue for detailed instructions" >> $GITHUB_STEP_SUMMARY
-            echo "4. Re-run this workflow after adding secrets" >> $GITHUB_STEP_SUMMARY
+            echo "::error::Missing required secrets for plan"
+            printf '%s\n' "${missing_secrets[@]}"
             exit 1
           fi
-          
-          echo "✅ All required secrets are configured!" >> $GITHUB_STEP_SUMMARY
           echo "secrets_valid=true" >> $GITHUB_OUTPUT
 
       - name: Download Encrypted Terraform State
@@ -167,19 +139,6 @@ jobs:
           location: artifact
           directory: ${{ env.WORKING_DIRECTORY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Verify State Downloaded
-        if: github.event_name != 'pull_request'
-        run: |
-          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
-          if [ -f "$STATE_FILE" ]; then
-            echo "✅ State file downloaded successfully"
-            echo "State file size: $(wc -c < "$STATE_FILE") bytes"
-            echo "State file exists before terraform init - this is correct!"
-          else
-            echo "⚠️  No state file found (this is OK for first run)"
-            echo "Terraform will start with empty state"
-          fi
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -194,95 +153,34 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
-      - name: Verify State File After Init
-        if: github.event_name != 'pull_request'
-        run: |
-          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
-          echo "## 🔍 Verifying State File After Terraform Init" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "🔍 Verifying state file after terraform init:"
-          echo "   State file path: $STATE_FILE"
-          
-          if [ -f "$STATE_FILE" ]; then
-            echo "✅ State file exists at: $STATE_FILE"
-            echo "✅ State file exists at: $STATE_FILE" >> $GITHUB_STEP_SUMMARY
-            STATE_SIZE=$(wc -c < "$STATE_FILE")
-            echo "   State file size: $STATE_SIZE bytes"
-            echo "State file size: $STATE_SIZE bytes" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            
-            # Check if it's valid JSON
-            if jq empty "$STATE_FILE" 2>/dev/null; then
-              echo "✅ State file is valid JSON" >> $GITHUB_STEP_SUMMARY
-              
-              # Get state file version
-              STATE_VERSION=$(jq -r '.version // "unknown"' "$STATE_FILE" 2>/dev/null)
-              echo "State file version: $STATE_VERSION" >> $GITHUB_STEP_SUMMARY
-              
-              # Count resources
-              RESOURCE_COUNT=$(jq -r '[.resources[]?] | length' "$STATE_FILE" 2>/dev/null || echo "0")
-              MANAGED_COUNT=$(jq -r '[.resources[]? | select(.mode == "managed" and .type != "null_resource")] | length' "$STATE_FILE" 2>/dev/null || echo "0")
-              echo "   Total resources in state: $RESOURCE_COUNT"
-              echo "   Managed resources (excluding null_resource): $MANAGED_COUNT"
-              echo "Resources in state: $RESOURCE_COUNT" >> $GITHUB_STEP_SUMMARY
-              echo "Managed resources: $MANAGED_COUNT" >> $GITHUB_STEP_SUMMARY
-              
-              if [ "$MANAGED_COUNT" -eq "0" ]; then
-                echo "⚠️  WARNING: State file has no managed resources!"
-                echo "⚠️  WARNING: State file has no managed resources!" >> $GITHUB_STEP_SUMMARY
-                echo "   This state is likely from a failed or incomplete apply"
-                echo "   Terraform plan may show resources that should already exist"
-              fi
-              
-              # List resource types
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "### Resource Types in State:" >> $GITHUB_STEP_SUMMARY
-              jq -r '.resources[]? | .type + "." + .name' "$STATE_FILE" 2>/dev/null | sort | while read resource; do
-                echo "- \`$resource\`" >> $GITHUB_STEP_SUMMARY
-              done || echo "No resources found" >> $GITHUB_STEP_SUMMARY
-              
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "### State File Preview:" >> $GITHUB_STEP_SUMMARY
-              echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
-              jq '{version, terraform_version, resources: [.resources[]? | {type, name, mode}]}' "$STATE_FILE" 2>/dev/null | head -30 >> $GITHUB_STEP_SUMMARY
-              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "❌ State file is NOT valid JSON!" >> $GITHUB_STEP_SUMMARY
-              echo "First 20 lines:" >> $GITHUB_STEP_SUMMARY
-              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-              head -20 "$STATE_FILE" >> $GITHUB_STEP_SUMMARY
-              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            fi
-            
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Terraform State List:" >> $GITHUB_STEP_SUMMARY
-            cd "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}"
-            if terraform state list 2>&1 | tee -a $GITHUB_STEP_SUMMARY; then
-              echo "" >> $GITHUB_STEP_SUMMARY
-              STATE_LIST_COUNT=$(terraform state list 2>/dev/null | wc -l)
-              echo "✅ Terraform can see $STATE_LIST_COUNT resource(s) in state" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "⚠️  Terraform state list failed or returned empty" >> $GITHUB_STEP_SUMMARY
-              echo "This might mean Terraform isn't using the state file" >> $GITHUB_STEP_SUMMARY
-            fi
-          else
-            echo "❌ No state file found at $STATE_FILE" >> $GITHUB_STEP_SUMMARY
-            echo "Terraform will start with empty state (this is normal for first run)" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Files in ${{ env.WORKING_DIRECTORY }}:" >> $GITHUB_STEP_SUMMARY
-            ls -la "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" >> $GITHUB_STEP_SUMMARY || echo "Directory not found" >> $GITHUB_STEP_SUMMARY
-          fi
-
       - name: Terraform Validate
         id: validate
         run: terraform validate -no-color
 
       - name: Terraform Plan
         id: plan
-        run: terraform plan -no-color -out=tfplan
+        run: |
+          terraform plan -no-color -out=tfplan
+          terraform show -json tfplan > tfplan.json
         continue-on-error: true
+
+      - name: APP-002 offline plan ownership guard
+        if: steps.plan.outcome == 'success'
+        working-directory: ${{ github.workspace }}
+        run: |
+          if [ ! -f examples/plan-ownership.example.json ]; then
+            echo "::error::Missing ownership allowlist example"
+            exit 1
+          fi
+          # Workflow must supply a real per-app ownership file in APP-005.
+          # Until then, fail closed unless PLAN_OWNERSHIP_PATH is provided as a secret-free artifact path.
+          if [ -z "${{ secrets.PLAN_OWNERSHIP_PATH }}" ] && [ ! -f "${{ github.workspace }}/app.plan-ownership.json" ]; then
+            echo "::warning::No app.plan-ownership.json present; writing guard reminder (plan not approved for apply)"
+            echo "APP-005 must verify remote accounts/permissions and pass ./scripts/validate-terraform-plan.sh before any apply." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+          OWNERSHIP_FILE="${{ github.workspace }}/app.plan-ownership.json"
+          ./scripts/validate-terraform-plan.sh --plan "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/tfplan.json" --ownership "$OWNERSHIP_FILE"
 
       - name: Terraform Plan Status
         if: steps.plan.outcome == 'failure'
@@ -293,289 +191,31 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan
-          path: ${{ env.WORKING_DIRECTORY }}/tfplan
+          path: |
+            ${{ env.WORKING_DIRECTORY }}/tfplan
+            ${{ env.WORKING_DIRECTORY }}/tfplan.json
           retention-days: 7
           if-no-files-found: ignore
 
-      - name: Comment PR
-        uses: actions/github-script@v7
-        if: github.event_name == 'pull_request' && steps.plan.outcome != 'failure'
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            let planOutput = '';
-            try {
-              planOutput = fs.readFileSync('${{ env.WORKING_DIRECTORY }}/tfplan', 'utf8');
-            } catch (e) {
-              planOutput = 'Plan output not available';
-            }
-
-            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
-            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
-            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
-
-            <details><summary>Show Plan</summary>
-
-            \`\`\`terraform
-            ${planOutput.substring(0, 65000)}
-            \`\`\`
-
-            </details>
-
-            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Working Directory: \`${{ env.WORKING_DIRECTORY }}\`, Workflow: \`${{ github.workflow }}\`*`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            })
-
   apply:
-    name: Terraform Apply
+    name: Terraform Apply (disabled APP-002)
     runs-on: ubuntu-latest
     needs: plan
-    environment: 
-      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-      # Manual approval required - configure in Settings → Environments → production → Required reviewers
-    if: |
-      github.event_name != 'pull_request' &&
-      needs.plan.result == 'success' &&
-      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (github.event.inputs.terraform_command == 'apply' || github.event.inputs.terraform_command == '')))
-    
-    defaults:
-      run:
-        working-directory: ${{ env.WORKING_DIRECTORY }}
-    
-    env:
-      # Terraform variables from GitHub Secrets
-      TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      TF_VAR_vercel_api_token: ${{ secrets.VERCEL_API_TOKEN }}
-      TF_VAR_supabase_url: ${{ secrets.SUPABASE_URL }}
-      TF_VAR_supabase_anon_key: ${{ secrets.SUPABASE_ANON_KEY }}
-      TF_VAR_supabase_service_role_key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      TF_VAR_supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      TF_VAR_supabase_project_id: ${{ steps.validate-secrets.outputs.project_id }}
-      TF_VAR_domain_name: ${{ secrets.DOMAIN_NAME }}
-      TF_VAR_app_url: ${{ secrets.APP_URL }}
-      TF_VAR_site_url: ${{ secrets.SITE_URL || format('https://{0}', secrets.DOMAIN_NAME) }}
-      TF_VAR_support_email_destination: ${{ secrets.SUPPORT_EMAIL_DESTINATION }}
-      TF_VAR_contact_email_destination: ${{ secrets.CONTACT_EMAIL_DESTINATION }}
-      TF_VAR_vercel_project_name: ${{ secrets.VERCEL_PROJECT_NAME }}
-      TF_VAR_github_repo: ${{ secrets.GITHUB_REPO || github.repository }}
-      TF_VAR_vercel_team_id: ${{ secrets.VERCEL_TEAM_ID }}
-      TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TF_VAR_cloudflare_zone_name: ${{ secrets.CLOUDFLARE_ZONE_NAME }}
-      TF_VAR_enable_email_routing: ${{ secrets.ENABLE_EMAIL_ROUTING || 'true' }}
-      TF_VAR_create_cloudflare_zone: ${{ secrets.CREATE_CLOUDFLARE_ZONE || 'false' }}
-      TF_VAR_enable_supabase_project_deletion: ${{ secrets.ENABLE_SUPABASE_PROJECT_DELETION || 'true' }}
-      TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
-      TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-
+    # Safely disable legacy apply path rather than leave an unguarded bypass.
+    if: false
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download Encrypted Terraform State
-        if: github.event_name != 'pull_request'
-        uses: badgerhobbs/terraform-state@v2
-        id: download-state
-        continue-on-error: true
-        with:
-          encryption_key: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
-          operation: download
-          location: artifact
-          directory: ${{ env.WORKING_DIRECTORY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download Plan Artifact
-        uses: actions/download-artifact@v4
-        id: download-plan
-        # Download to workspace root (not working directory) to preserve artifact structure
-        # Artifact was uploaded from ./terraform/tfplan, so it will extract to ./terraform/tfplan
-        with:
-          name: terraform-plan
-          path: ${{ github.workspace }}
-
-      - name: Verify and Move Plan Artifact
+      - name: Apply disabled
         run: |
-          echo "Current working directory: $(pwd)"
-          echo "Workspace: ${{ github.workspace }}"
-          echo "Working directory: ${{ env.WORKING_DIRECTORY }}"
-          # Artifact extracts to workspace root as tfplan (not preserving directory structure)
-          # Move it to the working directory where terraform expects it
-          PLAN_SOURCE="${{ github.workspace }}/tfplan"
-          PLAN_DEST="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/tfplan"
-          
-          if [ -f "$PLAN_SOURCE" ]; then
-            echo "✅ Plan artifact found at workspace root, moving to working directory"
-            mkdir -p "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}"
-            mv "$PLAN_SOURCE" "$PLAN_DEST"
-            echo "✅ Moved plan artifact to $PLAN_DEST"
-            ls -lh "$PLAN_DEST"
-          elif [ -f "$PLAN_DEST" ]; then
-            echo "✅ Plan artifact already in correct location"
-            ls -lh "$PLAN_DEST"
-          else
-            echo "::error::Plan artifact not found"
-            echo "Searching for tfplan files in workspace:"
-            find "${{ github.workspace }}" -name "tfplan" -o -name "*.tfplan" 2>/dev/null || true
-            exit 1
-          fi
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Apply
-        id: apply
-        run: terraform apply -auto-approve -no-color tfplan
-
-      - name: Check if State File Exists Before Upload
-        if: always() && github.event_name != 'pull_request'
-        id: check-state-apply
-        run: |
-          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
-          if [ -f "$STATE_FILE" ]; then
-            echo "✅ State file exists, will upload"
-            echo "state_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "⚠️  State file does not exist, skipping upload"
-            echo "state_exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Encrypt and Upload Terraform State
-        if: always() && github.event_name != 'pull_request' && steps.check-state-apply.outputs.state_exists == 'true'
-        uses: badgerhobbs/terraform-state@v2
-        with:
-          encryption_key: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
-          operation: upload
-          location: artifact
-          directory: ${{ env.WORKING_DIRECTORY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          echo "APP-002/APP-005: terraform apply is disabled until remote verification + immutable plan guard are enforced."
+          exit 1
 
   destroy:
-    name: Terraform Destroy
+    name: Terraform Destroy (disabled APP-002)
     runs-on: ubuntu-latest
-    environment: 
-      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
-      # Manual approval required - configure in Settings → Environments → production → Required reviewers
-    if: |
-      github.event_name == 'workflow_dispatch' &&
-      github.event.inputs.terraform_command == 'destroy'
-    
-    defaults:
-      run:
-        working-directory: ${{ env.WORKING_DIRECTORY }}
-    
-    env:
-      # Same env vars as plan job
-      TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      TF_VAR_vercel_api_token: ${{ secrets.VERCEL_API_TOKEN }}
-      TF_VAR_supabase_url: ${{ secrets.SUPABASE_URL }}
-      TF_VAR_supabase_anon_key: ${{ secrets.SUPABASE_ANON_KEY }}
-      TF_VAR_supabase_service_role_key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      TF_VAR_supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      TF_VAR_supabase_project_id: ${{ steps.validate-secrets.outputs.project_id }}
-      TF_VAR_domain_name: ${{ secrets.DOMAIN_NAME }}
-      TF_VAR_app_url: ${{ secrets.APP_URL }}
-      TF_VAR_site_url: ${{ secrets.SITE_URL || format('https://{0}', secrets.DOMAIN_NAME) }}
-      TF_VAR_support_email_destination: ${{ secrets.SUPPORT_EMAIL_DESTINATION }}
-      TF_VAR_contact_email_destination: ${{ secrets.CONTACT_EMAIL_DESTINATION }}
-      TF_VAR_vercel_project_name: ${{ secrets.VERCEL_PROJECT_NAME }}
-      TF_VAR_github_repo: ${{ secrets.GITHUB_REPO || github.repository }}
-      TF_VAR_vercel_team_id: ${{ secrets.VERCEL_TEAM_ID }}
-      TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TF_VAR_cloudflare_zone_name: ${{ secrets.CLOUDFLARE_ZONE_NAME }}
-      TF_VAR_enable_email_routing: ${{ secrets.ENABLE_EMAIL_ROUTING || 'true' }}
-      TF_VAR_create_cloudflare_zone: ${{ secrets.CREATE_CLOUDFLARE_ZONE || 'false' }}
-      TF_VAR_enable_supabase_project_deletion: ${{ secrets.ENABLE_SUPABASE_PROJECT_DELETION || 'true' }}
-      TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
-      TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-
+    # Destroy permanently disabled for shared-project safety.
+    if: false
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download Encrypted Terraform State
-        uses: badgerhobbs/terraform-state@v2
-        id: download-state
-        continue-on-error: true
-        with:
-          encryption_key: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
-          operation: download
-          location: artifact
-          directory: ${{ env.WORKING_DIRECTORY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify State File Before Destroy
+      - name: Destroy disabled
         run: |
-          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
-          echo "Verifying state file before destroy:"
-          if [ -f "$STATE_FILE" ]; then
-            echo "✅ State file exists at: $STATE_FILE"
-            ls -lh "$STATE_FILE"
-            echo "State file size: $(wc -c < "$STATE_FILE") bytes"
-            
-            # Check if it's valid JSON and has resources
-            if jq empty "$STATE_FILE" 2>/dev/null; then
-              RESOURCE_COUNT=$(jq -r '[.resources[]?] | length' "$STATE_FILE" 2>/dev/null || echo "0")
-              echo "Resources in state: $RESOURCE_COUNT"
-              if [ "$RESOURCE_COUNT" -eq "0" ]; then
-                echo "⚠️  State file has no resources - nothing to destroy"
-              else
-                echo "✅ State file contains $RESOURCE_COUNT resource(s) to destroy"
-              fi
-            else
-              echo "⚠️  State file is not valid JSON"
-            fi
-          else
-            echo "❌ No state file found at $STATE_FILE"
-            echo "Terraform will have no state to destroy"
-            echo "Files in ${{ env.WORKING_DIRECTORY }}:"
-            ls -la "${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}" || echo "Directory not found"
-          fi
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Destroy
-        id: destroy
-        run: terraform destroy -auto-approve -no-color
-
-      - name: Check if State File Exists Before Upload
-        if: always() && github.event_name != 'pull_request'
-        id: check-state-destroy
-        run: |
-          STATE_FILE="${{ github.workspace }}/${{ env.WORKING_DIRECTORY }}/terraform.tfstate"
-          if [ -f "$STATE_FILE" ]; then
-            echo "✅ State file exists, will upload"
-            echo "state_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "⚠️  State file does not exist, skipping upload"
-            echo "state_exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Encrypt and Upload Terraform State
-        if: always() && github.event_name != 'pull_request' && steps.check-state-destroy.outputs.state_exists == 'true'
-        uses: badgerhobbs/terraform-state@v2
-        with:
-          encryption_key: ${{ secrets.TERRAFORM_STATE_PASSWORD }}
-          operation: upload
-          location: artifact
-          directory: ${{ env.WORKING_DIRECTORY }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          echo "APP-002: destroy entrypoint is disabled. Shared Supabase project and cross-app resources must not be removed by this template."
+          exit 1

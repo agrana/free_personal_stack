@@ -1,55 +1,101 @@
-variable "domain_name" {
-  description = "The domain name for your project (e.g., myproject.com)"
+variable "approved_hostname" {
+  description = "Explicitly approved FQDN for this app only (APP-002). Required; no shared root/www/api defaults."
   type        = string
+
+  validation {
+    condition     = can(regex("^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$", var.approved_hostname)) && length(var.approved_hostname) <= 253
+    error_message = "approved_hostname must be a lowercase FQDN without URL, path, port, or wildcard."
+  }
 }
 
-variable "app_url" {
-  description = "The URL where your app is hosted (e.g., myproject.vercel.app). If empty, inferred from vercel_project_name"
+# Compatibility alias used by older docs; prefer approved_hostname.
+variable "domain_name" {
+  description = "Deprecated alias for approved_hostname. Leave empty to use approved_hostname."
   type        = string
   default     = ""
 }
 
+variable "app_url" {
+  description = "Vercel app URL (e.g., myproject.vercel.app). Required when enable_dns is true."
+  type        = string
+  default     = ""
+}
+
+variable "enable_dns" {
+  description = "Manage DNS for approved_hostname. Default false (fail closed). Requires dns_provider=cloudflare."
+  type        = bool
+  default     = false
+}
+
+variable "dns_provider" {
+  description = <<-EOT
+    DNS provider selection matching app.config dns.choice:
+    - unresolved: fail closed if enable_dns=true
+    - cloudflare: only supported DNS implementation in this template
+    - cloudfront: NOT implemented here; enable_dns must stay false until a later CloudFront slice
+  EOT
+  type        = string
+  default     = "unresolved"
+
+  validation {
+    condition     = contains(["unresolved", "cloudflare", "cloudfront"], var.dns_provider)
+    error_message = "dns_provider must be unresolved, cloudflare, or cloudfront."
+  }
+}
+
 variable "support_email_destination" {
-  description = "Real email address where support@domain emails should be forwarded (e.g., your-email@gmail.com)"
+  description = "Unused unless enable_email_routing=true (default false; shared mail routing not owned by apps)."
   type        = string
   default     = ""
 }
 
 variable "contact_email_destination" {
-  description = "Real email address where contact@domain and hello@domain emails should be forwarded (e.g., your-email@gmail.com)"
+  description = "Unused unless enable_email_routing=true (default false; shared mail routing not owned by apps)."
   type        = string
   default     = ""
 }
 
 variable "enable_email_routing" {
-  description = "Enable Cloudflare email routing module (manages routing rules and optionally settings)"
+  description = "Enable Cloudflare email routing. Default false — apps do not own shared mail routing (APP-002)."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "manage_email_routing_settings" {
-  description = "Manage email routing settings (enabling/disabling). Requires account-level API token permissions. Set to false if you only have zone-level permissions (routing rules can still be managed)."
+  description = "Manage email routing settings. Kept for compatibility; email routing stays disabled by default."
   type        = bool
   default     = false
 }
 
 variable "cloudflare_api_token" {
-  description = "Cloudflare API token with all required permissions (Zone:Zone:Read, Zone:DNS:Edit, Zone:Email Routing:Read, Zone:Email Routing:Edit)"
+  description = "Cloudflare API token (required only when enable_dns=true with dns_provider=cloudflare)"
   type        = string
   sensitive   = true
+  default     = ""
 }
 
 variable "cloudflare_account_id" {
-  description = "Cloudflare account ID - required for some accounts. Find it in Cloudflare Dashboard → Account Settings, or in the URL when viewing your account. Leave empty for personal accounts (may not work for all account types)"
+  description = "Cloudflare account ID (optional). Apps do not create or own the shared DNS zone."
   type        = string
   default     = ""
   nullable    = true
 }
 
 variable "create_cloudflare_zone" {
-  description = "Create a new Cloudflare zone if it doesn't exist. Set to false if the zone already exists in your Cloudflare account."
+  description = "MUST remain false. Template apps must not create or own the shared DNS zone (APP-002)."
   type        = bool
   default     = false
+
+  validation {
+    condition     = var.create_cloudflare_zone == false
+    error_message = "create_cloudflare_zone must be false; shared zone ownership is forbidden (APP-002)."
+  }
+}
+
+variable "cloudflare_zone_name" {
+  description = "Existing Cloudflare zone name to look up when enable_dns=true (data source only; never created)."
+  type        = string
+  default     = ""
 }
 
 variable "vercel_api_token" {
@@ -65,20 +111,36 @@ variable "vercel_team_id" {
 }
 
 variable "vercel_project_name" {
-  description = "Name of the Vercel project (if empty, inferred from domain_name by removing dots and special chars)"
+  description = "Distinct per-app Vercel project name. REQUIRED — must match app.config deployment.identity. No shared default."
   type        = string
-  default     = ""
+
+  validation {
+    condition     = length(var.vercel_project_name) > 0 && can(regex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", var.vercel_project_name))
+    error_message = "vercel_project_name is required and must be a safe lowercase slug matching deployment.identity."
+  }
 }
 
 variable "github_repo" {
-  description = "GitHub repository in format 'owner/repo'. In GitHub Actions, can be inferred from github.repository context"
+  description = "GitHub repository in format 'owner/repo'"
   type        = string
   default     = ""
 }
 
-# Supabase Configuration
+variable "deployment_state_key" {
+  description = <<-EOT
+    Per-app isolated Terraform/state key. REQUIRED. Must match app.config deployment.stateKey.
+    Do not reuse another app's key — shared keys can clobber state (APP-002).
+  EOT
+  type        = string
+
+  validation {
+    condition     = length(var.deployment_state_key) > 0 && can(regex("^[a-z0-9]([a-z0-9._-]{0,126}[a-z0-9])?$", var.deployment_state_key))
+    error_message = "deployment_state_key is required; supply a unique per-app key."
+  }
+}
+
 variable "supabase_url" {
-  description = "Supabase project URL"
+  description = "Shared Supabase project URL (reference / env wiring only)"
   type        = string
   sensitive   = true
 }
@@ -95,7 +157,6 @@ variable "supabase_service_role_key" {
   sensitive   = true
 }
 
-# Google OAuth Configuration
 variable "google_client_id" {
   description = "Google OAuth client ID"
   type        = string
@@ -110,45 +171,39 @@ variable "google_client_secret" {
   default     = ""
 }
 
-# NextAuth Configuration
 variable "nextauth_secret" {
-  description = "NextAuth secret key (auto-generated if not provided)"
+  description = "NextAuth secret key"
   type        = string
   sensitive   = true
   default     = ""
   nullable    = true
 }
 
-# Supabase Configuration
 variable "supabase_access_token" {
-  description = "Supabase access token (get from https://supabase.com/dashboard/account/tokens)"
+  description = "Supabase access token (optional for reference-only module; not used for project deletion)"
   type        = string
   sensitive   = true
+  default     = ""
 }
 
 variable "supabase_project_id" {
-  description = "Supabase project ID"
+  description = "Existing shared Supabase project ID (reference only)"
   type        = string
 }
 
 variable "enable_supabase_project_deletion" {
-  description = <<-EOT
-    Enable automatic Supabase project deletion via CLI when running terraform destroy.
-    Requires Supabase CLI installed (npm install -g supabase or via npx) and supabase_access_token set.
-    
-    ⚠️  WARNING: When enabled (default: true), running terraform destroy will:
-    - Delete your Supabase project permanently
-    - Delete all data in the project
-    - This action CANNOT be undone!
-    
-    Set to false if you want to manage Supabase project deletion manually.
-  EOT
+  description = "REMOVED capability (APP-002). Must remain false — shared project must never be deleted by this template."
   type        = bool
-  default     = true
+  default     = false
+
+  validation {
+    condition     = var.enable_supabase_project_deletion == false
+    error_message = "enable_supabase_project_deletion must be false; shared Supabase project deletion is forbidden (APP-002)."
+  }
 }
 
 variable "site_url" {
-  description = "Production site URL (defaults to https://{domain_name})"
+  description = "Production site URL (defaults to https://{approved_hostname})"
   type        = string
   default     = ""
 }
