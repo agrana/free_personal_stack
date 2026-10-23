@@ -1,8 +1,8 @@
 name: Deploy to Supabase
 
-# APP-002 / APP-003: automatic migrations against the shared Supabase project
-# are disabled until namespaced, reviewed migration automation (APP-003) exists.
-# Leaving db push enabled would bypass the shared-database guard.
+# APP-002 / APP-003: unattended migrations against the shared Supabase project
+# remain disabled. APP-003 provides an app-scoped harness + local fixtures, but
+# does not restore supabase db push / automatic main deploy migrations.
 
 on:
   push:
@@ -18,13 +18,14 @@ env:
 
 jobs:
   migrate:
-    name: Run Database Migrations (disabled pending APP-003)
+    name: Run Database Migrations (disabled — no unattended main path)
     runs-on: ubuntu-latest
     environment: production
     if: false
     steps:
       - name: Migrations disabled
         run: |
-          echo "APP-002/APP-003: automatic shared DB migrations are disabled."
-          echo "Do not re-enable supabase db push until APP-003 namespaced migration review exists."
+          echo "APP-003: unattended shared DB migrations stay disabled."
+          echo "Use reviewed app-scoped migrate_app_namespace with immutable SQL/checksums."
+          echo "Do not re-enable supabase db push on main."
           exit 1

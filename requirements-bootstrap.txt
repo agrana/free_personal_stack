@@ -1,9 +1,12 @@
-# Pinned bootstrap deps for APP-001 config validation (isolated venv only).
+# Pinned bootstrap deps for APP-001/002/003 (isolated venv only).
 # Do not install into the system/global Python interpreter.
 #
 #   python3 -m venv .venv
 #   .venv/bin/pip install -r requirements-bootstrap.txt
 #   .venv/bin/python tests/config-validation_test.py
+#   .venv/bin/python tests/plan-guard_test.py
+#   .venv/bin/python tests/infra-safety_test.py
+#   .venv/bin/python tests/shared_db_isolation_test.py
 #
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
@@ -11,3 +14,5 @@ referencing==0.37.0
 attrs==25.4.0
 rpds-py==0.30.0
 typing-extensions==4.16.0
+psycopg==3.2.10
+psycopg-binary==3.2.10

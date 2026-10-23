@@ -137,12 +137,49 @@ class InfraSafetyTests(unittest.TestCase):
         wf = _read(".github/workflows/deploy.yml")
         self.assertTrue(
             "APP-003" in wf or "disabled" in wf.lower(),
-            "automatic shared DB migrations must be disabled pending APP-003",
+            "automatic shared DB migrations must remain disabled after APP-003",
+        )
+        self.assertIn("if: false", wf)
+        self.assertNotRegex(
+            wf,
+            r"(?m)^\s*run:.*supabase\s+db\s+push\b",
+            msg="db push must not be an executable workflow step",
+        )
+        self.assertIn("APP003_MIGRATIONS_DISABLED", wf)
+
+    def test_app003_harness_and_docs_exist_without_unattended_path(self):
+        self.assertTrue((REPO_ROOT / "scripts" / "migrate_app_namespace.py").is_file())
+        self.assertTrue(
+            (REPO_ROOT / "db" / "shared_isolation" / "provision" / "01_control_and_roles.sql").is_file()
         )
         self.assertTrue(
-            "if: false" in wf or "supabase db push" not in wf,
-            "db push must not run automatically against shared project",
+            (
+                REPO_ROOT
+                / "db"
+                / "shared_isolation"
+                / "provision"
+                / "00_disposable_test_baseline.sql"
+            ).is_file()
         )
+        provision = _read("db/shared_isolation/provision/01_control_and_roles.sql")
+        self.assertNotRegex(
+            provision,
+            r"(?m)^\s*REVOKE CREATE ON SCHEMA public FROM PUBLIC\s*;",
+        )
+        self.assertNotRegex(
+            provision,
+            r"(?m)^\s*GRANT anon TO authenticator\s*;",
+        )
+        self.assertIn("realtime_allowlist", provision)
+        docs = _read("docs/bootstrap.md")
+        self.assertIn("APP-003", docs)
+        self.assertIn("advisory", docs.lower())
+        self.assertIn("service_role", docs)
+        self.assertIn("example-owner", docs)
+        self.assertIn("transaction-control", docs.lower())
+        pkg = json.loads(_read("package.json"))
+        body = pkg["scripts"]["db:migrate"].lower()
+        self.assertTrue("disabled" in body or "exit 1" in body)
 
     def test_package_scripts_block_destroy_reset_apply(self):
         pkg = json.loads(_read("package.json"))
