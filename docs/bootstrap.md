@@ -1,11 +1,11 @@
-# App bootstrap contract (APP-001 + APP-002)
+# App bootstrap contract (APP-001 + APP-002 + APP-003)
 
 Pinned template revision: `7f21f51209659a77fd56b19e6116f388e783d93d`
 
-Branch: `feat/app-bootstrap-contract`
+Branches: `feat/app-bootstrap-contract` (APP-001/002), `feat/shared-database-isolation` (APP-003)
 
-Scope: reusable **non-secret** app configuration (APP-001) and shared-project infrastructure hardening + offline plan guard (APP-002).
-Not in scope: namespaced DB migrations (APP-003), full plan/apply/resume automation (APP-005), game/initializer product work.
+Scope: reusable **non-secret** app configuration (APP-001), shared-project infrastructure hardening + offline plan guard (APP-002), and reusable shared-database migration/access isolation (APP-003).
+Not in scope: full plan/apply/resume automation (APP-005), product UI / live SavedTube cutover.
 
 ## What this contract is
 
@@ -182,8 +182,8 @@ Goal: make this reusable template safe when many apps share **one existing** Sup
 | Path | APP-002 status |
 | --- | --- |
 | `.github/workflows/terraform.yml` apply / destroy | `if: false` — disabled until APP-005 enforcement |
-| `.github/workflows/deploy.yml` migrations | `if: false` — disabled pending APP-003 |
-| `package.json` `terraform:apply` / `destroy`, `infra:apply` / `destroy`, `db:reset` / `db:migrate` | exit 1 stubs |
+| `.github/workflows/deploy.yml` migrations | `if: false` — **stays disabled** after APP-003 (no unattended main path) |
+| `package.json` `terraform:apply` / `destroy`, `infra:apply` / `destroy`, `db:reset` / `db:migrate` | exit 1 stubs (`db:migrate:app` is the explicit harness only) |
 | `scripts/quick-start.sh` apply / destroy | exit 1 |
 
 ### Offline plan ownership guard (implemented)
@@ -234,7 +234,94 @@ APP-002 disables unguarded apply/destroy. APP-005 must implement:
 7. **No secret values in artifacts** — plans/logs store alias names and redacted refs only.
 8. **Dry run + idempotent resume** — safe re-entry after interruption.
 
-Until APP-005, supported commands are: app-config validation (APP-001), offline plan guard (APP-002), and read-only `terraform plan` where credentials exist locally.
+Until APP-005, supported commands are: app-config validation (APP-001), offline plan guard (APP-002), APP-003 local/reviewed app-namespace migrate harness, and read-only `terraform plan` where credentials exist locally.
+
+## APP-003 — shared-database migration / access isolation
+
+Goal: when multiple apps share **one** existing Supabase/Postgres database, each app can migrate and query only inside its own namespace, without touching Supabase CLI / SavedTube migration history, and without claiming isolation from a project-wide admin key.
+
+### What is implemented
+
+| Piece | Role |
+| --- | --- |
+| `db/shared_isolation/provision/00_disposable_test_baseline.sql` | **Disposable local test only**: Supabase-like roles, authenticator memberships, `REVOKE CREATE ON public FROM PUBLIC` |
+| `db/shared_isolation/provision/01_control_and_roles.sql` | **Trusted reusable provisioning**: control schema, registration, ledger RLS, Realtime allowlist, scoped SECURITY DEFINER guard |
+| `scripts/migrate_app_namespace.py` (+ `.sh`) | App migrator harness: ordered IDs, SHA-256 checksums, transaction-scoped advisory lock + retry, idempotent re-apply |
+| `db/shared_isolation/fixtures/app_{alpha,beta}/` | Two fixture apps demonstrating denial, sanitized projection, private-state exclusion from Realtime |
+| `db/shared_isolation/fixtures/preexisting/` | Pre-existing tables + mock `supabase_migrations` history that must remain untouched |
+| `tests/shared_db_isolation_test.py` | Unit + disposable local Postgres integration (podman) |
+
+### Ledger and lock model
+
+- Ledger table: `app_migration_control.ledger` keyed by `(app_namespace, migration_id)` with `checksum_sha256`.
+- App migrators may **SELECT** their own rows (RLS bound to `session_user` + `registered_apps`, not a user-settable GUC) and **record** via `record_applied` only; direct INSERT/UPDATE/DELETE are denied.
+- Transaction-scoped advisory locks (`pg_try_advisory_xact_lock`) are held until the apply transaction commits or rolls back; retry/backoff on contention.
+- Idempotence: same id + checksum → skip; same id + different checksum → **abort**; new id below ledger max → **abort** (out-of-order).
+- Each migration file is read once into immutable bytes shared by checksum and execution (no TOCTOU re-read).
+- The harness **never** reads `DATABASE_URL` / `SUPABASE_DB_URL` from the environment. Prefer `--database-url-file` / `--database-url-stdin` so credentials are not visible in process listings; `--database-url` is allowed only with `--local-disposable-only` (tests) or reviewed `APP003_ALLOW_NON_LOCAL=1`. CLI errors are redacted.
+
+### Privilege model (not regex)
+
+Arbitrary SQL cannot be made safe by regex. Isolation is:
+
+1. Restricted `{namespace}_migrator` LOGIN roles (CREATE only in own schema; per-role `REVOKE CREATE` on `public` only — never silent global `REVOKE … FROM PUBLIC`).
+2. Transaction boundaries in the harness (see trusted SQL limits below).
+3. Trusted provisioning separated from app migration files and from disposable test baseline.
+4. Event trigger rejecting `SECURITY DEFINER` only for registered migrator sessions and registered app namespaces (unrelated preexisting owners may still create approved definer routines).
+5. Realtime membership only through `add_to_realtime`, which checks a bootstrap-managed `realtime_allowlist` (app migrations cannot extend the allowlist or publish alternate tables).
+6. `provision_app` fail-closed: incompatible `PUBLIC` CREATE baseline → operator prerequisite error; unknown existing roles/schema owners → collision error (no password reset of strangers); namespace length capped so `{namespace}_migrator` fits in 63-byte identifiers.
+7. Reusable provisioning does **not** alter shared `authenticator` role memberships.
+
+### Supabase roles and JWT boundary (explicit)
+
+| Role | Meaning in this contract |
+| --- | --- |
+| `anon` | Untrusted client role; only what RLS + grants allow |
+| `authenticated` | Logged-in client; fixture policies require JWT claims `request.jwt.claim.sub` (owner) **and** `request.jwt.claim.app_namespace` (app) |
+| `service_role` | **Privileged** (`BYPASSRLS`). It can read private game state. That is an operator/admin escape hatch, **not** an app-isolation guarantee. Migrations must not use a project-wide admin/service key to “prove” cross-app isolation |
+
+JWT app/owner authorization is an application boundary on top of schema grants. Schema privileges stop cross-app DDL/DML from migrator roles; RLS + sanitized views stop cross-user leakage inside an app for `anon`/`authenticated`.
+
+### Sanitized projection and Realtime
+
+- Private table: `game_private_state` (never added to `supabase_realtime`).
+- Public events may be published via the helper.
+- View `game_sanitized_projection` uses `security_barrier` + `security_invoker` and **omits** `secret_payload` (exposes only `has_secret`).
+
+### Commands
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-bootstrap.txt
+
+# Disposable local integration (podman + postgres image; loopback only)
+.venv/bin/python tests/shared_db_isolation_test.py
+
+# Manual harness: prefer file/stdin so the URL is not on argv
+printf '%s\n' 'postgresql://app_alpha_migrator:…@127.0.0.1:55432/app003' \
+  > /tmp/app003-db-url
+./scripts/migrate_app_namespace.sh \
+  --database-url-file /tmp/app003-db-url \
+  --namespace app_alpha \
+  --migrations-dir db/shared_isolation/fixtures/app_alpha \
+  --local-disposable-only
+```
+
+Integration tests set `APP003_PG_TESTS=auto` (default): run when `podman` can use `APP003_PG_IMAGE` (default `docker.io/library/postgres:16-alpine`). Set `APP003_PG_TESTS=0` to skip DB integration; unit tests still run.
+
+### Ledger coordination limits (honest)
+
+- **SavedTube code/history was not inspected** in APP-003. The preexisting fixture only simulates a shared history table.
+- Advisory locks exclude **other writers that use the same lock protocol**. They cannot promise exclusion against legacy `supabase db push`, manual superuser DDL, or other tools that ignore the ledger.
+- All future writers must adopt this lock/ledger **or** explicitly serialize maintenance windows.
+- **Trusted SQL transaction-control limitation:** migration files are reviewed operator SQL executed as a multi-statement script. The harness does **not** sandbox `COMMIT` / `ROLLBACK` / `SET TRANSACTION` inside those files; a migration that issues transaction-control statements can end the harness transaction early. Treat transaction control in migration SQL as forbidden unless the apply path is redesigned around single-statement execution.
+- Live shared-project compatibility remains **pending** operator review; fixture pass ≠ production sign-off.
+- Operator prerequisite before reusable `provision_app`: `PUBLIC` must already lack `CREATE` on schema `public` (apply that revoke in a reviewed change window — reusable provisioning will not rewrite shared public grants).
+- Production apply (when allowed later) requires backup/recovery readiness, immutable SQL + checksum approval, and must not re-enable unattended main deploy migrations.
+
+### Example identity in docs
+
+Use generic `example-owner` / `example.com` in documentation and examples (already used by APP-001 config examples).
 
 ## Blocking preflight items (explicit)
 
@@ -264,3 +351,16 @@ These are **not** verified as live facts in APP-001/APP-002. Deployment-ready on
 - `tests/fixtures/plans/*`
 - Terraform defaults and modules under `terraform/` (shared-project safe)
 - Disabled mutate paths in `.github/workflows/terraform.yml`, `.github/workflows/deploy.yml`, `package.json`, `scripts/quick-start.sh`
+
+## Files introduced by APP-003
+
+- `scripts/migrate_app_namespace.py` / `scripts/migrate_app_namespace.sh`
+- `db/shared_isolation/provision/00_disposable_test_baseline.sql`
+- `db/shared_isolation/provision/01_control_and_roles.sql`
+- `db/shared_isolation/fixtures/preexisting/01_seed.sql`
+- `db/shared_isolation/fixtures/app_alpha/*.sql`
+- `db/shared_isolation/fixtures/app_beta/*.sql`
+- `tests/shared_db_isolation_test.py`
+- `docs/bootstrap.md` (this section)
+- `requirements-bootstrap.txt` (`psycopg` for local DB tests/harness)
+- Deploy workflow remains `if: false` (no restored unattended migration path)
