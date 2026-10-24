@@ -12,7 +12,7 @@
     "type-check": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "echo \"No tests specified yet\" && exit 0",
+    "test": "python3 scripts/run-all-tests.py",
     "prepare": "husky",
     "pre-commit": "lint-staged",
     "pre-commit-full": "./scripts/pre-commit-check.sh",
@@ -36,7 +36,11 @@
     "db:migrate": "node -e \"console.error('DISABLED: unattended shared DB migrations stay off after APP-003; use scripts/migrate_app_namespace.sh with explicit --database-url and --local-disposable-only (or reviewed APP003_ALLOW_NON_LOCAL=1)'); process.exit(1)\"",
     "db:migrate:app": "./scripts/migrate_app_namespace.sh",
     "db:seed": "node -e \"console.error('DISABLED by APP-002: database seed against shared Supabase is forbidden'); process.exit(1)\"",
-    "plan:guard": "./scripts/validate-terraform-plan.sh"
+    "plan:guard": "./scripts/validate-terraform-plan.sh",
+    "test:unit": "python3 scripts/run-all-tests.py",
+    "verify:deployment": "./scripts/verify-deployment.sh",
+    "test:health": "python3 -m unittest tests.deployment_verification_test -v",
+    "test:health-http": "python3 scripts/health-route-http-smoke.py"
   },
   "dependencies": {
     "next": "^14.0.0",
