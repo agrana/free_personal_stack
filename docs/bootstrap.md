@@ -1,11 +1,11 @@
-# App bootstrap contract (APP-001 + APP-002 + APP-003 + APP-004)
+# App bootstrap contract (APP-001 + APP-002 + APP-003 + APP-004 + APP-005)
 
 Pinned template revision: `7f21f51209659a77fd56b19e6116f388e783d93d`
 
-Branches: `feat/app-bootstrap-contract` (APP-001/002), `feat/shared-database-isolation` (APP-003), `feat/credential-preflight` (APP-004)
+Branches: `feat/app-bootstrap-contract` (APP-001/002), `feat/shared-database-isolation` (APP-003), `feat/credential-preflight` (APP-004), `feat/app-initializer` (APP-005)
 
-Scope: reusable **non-secret** app configuration (APP-001), shared-project infrastructure hardening + offline plan guard (APP-002), reusable shared-database migration/access isolation (APP-003), and secure credential preflight/binding (APP-004).
-Not in scope: full plan/apply/resume automation (APP-005), product UI / live SavedTube cutover, creating a new Vercel project, or claiming live production credential readiness.
+Scope: reusable **non-secret** app configuration (APP-001), shared-project infrastructure hardening + offline plan guard (APP-002), reusable shared-database migration/access isolation (APP-003), secure credential preflight/binding (APP-004), and configuration-driven initializer plan/apply/resume (APP-005 offline + fixture adapters).
+Not in scope: product UI / live SavedTube cutover, claiming live production credential readiness, or **verified live** Vercel/DNS/Terraform apply (deployment gate — see APP-005).
 
 ## What this contract is
 
@@ -222,20 +222,22 @@ Required before any apply against existing state:
 2. Manually review **state detachment** for any shared resources that must remain (zone, mail, shared DB). Live `terraform state rm` / import / migrate against real resources is **out of scope** for APP-002 and must be a deliberate operator action after review — this repo does not perform it.
 3. Refuse apply until APP-005 remote account/permission verification exists.
 
-### Plan / apply / resume contract (APP-005 — not implemented)
+### Plan / apply / resume contract (APP-005 — implemented offline; live apply gated)
 
-APP-002 disables unguarded apply/destroy. APP-005 must implement:
+APP-002 disables unguarded apply/destroy. APP-005 implements a configuration-driven initializer with durable manifests, reviewed plan digests, and an explicit **live-integration missing** gate.
 
-1. **Plan (read-only)** — compute intended app-scoped changes without mutating infrastructure.
-2. **Explicit app-scoped resource ownership** — only resources keyed to this app’s `deployment.identity` / `stateKey` / `namespace` / approved hostname.
-3. **Immutable reviewed plan hash** — apply only after human review of that exact plan artifact.
-4. **Remote account identity + permissions verification** — verify live cloud accounts/permissions **before** plan/apply; enforce this on every workflow/script path that could apply (do not leave legacy bypasses).
-5. **Shared DB guard** — refuse if shared-database preservation checks fail.
-6. **Manual DNS choice** — honor `dns.choice`; never auto-flip global DNS/email; CloudFront only via a dedicated later implementation.
-7. **No secret values in artifacts** — plans/logs store alias names and redacted refs only.
-8. **Dry run + idempotent resume** — safe re-entry after interruption.
+| Capability | Status |
+| --- | --- |
+| Offline `plan` (validate config, pin template, scaffold, secret-free plan artifact) | **Implemented** |
+| Reviewed-plan-bound `apply` / `resume` interface | **Implemented** |
+| Idempotent local re-plan / fixture-adapter re-apply | **Implemented** (tests) |
+| Interrupted resume without duplicate adoption-by-name | **Implemented** (fixture adapter tests) |
+| Default shipped apply adapter performing live cloud mutations | **Not integrated** — `apply.live_integration_missing` |
+| Live Vercel/DNS/account verification against real providers | **Unverified** — deployment gate |
 
-Until APP-005, supported commands are: app-config validation (APP-001), offline plan guard (APP-002), APP-003 local/reviewed app-namespace migrate harness, and read-only `terraform plan` where credentials exist locally.
+Honest limitation: fixture `RecordingApplyAdapter` tests prove orchestration contracts only. They are **not** evidence that live adapters work. Treat `gates.liveApplyIntegrated: false` and `apply.live_integration_missing` as a **deployment gate** until a reviewed live adapter lands (APP-006+).
+
+Pinning: `TEMPLATE_REVISION` markers are **never sufficient alone**. The controlling git repository must contain the pinned commit object (`git cat-file`), and materializable template contents are hashed into scaffold/plan digests.
 
 ## APP-003 — shared-database migration / access isolation
 
@@ -408,11 +410,77 @@ python3 -m venv .venv
 
 These are **not** verified as live facts in APP-001/APP-002. Deployment-ready only requires the corresponding **metadata flags**. Callers must still perform independent live verification before apply:
 
-1. Live account/permission verification (`externalVerification.accountPermissions`) — **APP-005 must enforce**
-2. Shared-database preservation guard (`externalVerification.sharedDatabaseGuard`)
+1. Live account/permission verification (`externalVerification.accountPermissions`) — APP-005 **blocks** default apply with `apply.live_integration_missing` until a live adapter exists; metadata `verified` is still never proof
+2. Shared-database preservation guard (`externalVerification.sharedDatabaseGuard`) — live check still required before any real apply
 3. Approved secret-source verification for aliases (`externalVerification.secretSource`) — APP-004 provides local presence/binding preflight only; live supervisor verification remains required
-4. Live conflict discovery (`externalVerification.liveConflictDiscovery`)
-5. Resolved DNS choice (`dns.choice` ≠ `unresolved`)
+4. Live conflict discovery (`externalVerification.liveConflictDiscovery`) — fixture inventory only in APP-005 tests
+5. Resolved DNS choice (`dns.choice` ≠ `unresolved`) — APP-005 apply fails closed on unresolved / cloudfront
+
+## APP-005 — configuration-driven initializer
+
+Goal: repeatable plan → human-reviewed digest → apply/resume for a new app tree, without lifecycle-owning the shared Supabase database, without embedding secrets, and without claiming live provider success when only offline/fixture paths are available.
+
+### What is implemented
+
+| Piece | Role |
+| --- | --- |
+| `bootstrap/` package | Plan/apply/resume engine, path safety, locks, atomic manifest, adapters |
+| `bootstrap-manifest.schema.json` | Closed-field durable resume state (IDs/hashes/stages only) |
+| `scripts/app-new.py` (+ `.sh`) | CLI: `plan` / `apply` / `resume` with fixed redacted codes |
+| `tests/fixtures/bootstrap/` | Minimal template + two distinct app configs |
+| `tests/app_initializer_test.py` | Offline generation + fixture-adapter regression suite |
+
+### Commands
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-bootstrap.txt
+
+# Offline plan (local scaffold + reviewed plan digest; no remote mutations)
+./scripts/app-new.sh plan \
+  --config tests/fixtures/bootstrap/configs/agent-arena.cloudflare.json \
+  --template-revision 7f21f51209659a77fd56b19e6116f388e783d93d \
+  --template-root tests/fixtures/bootstrap/template \
+  --output-root /tmp/app005-out \
+  --state-root /tmp/app005-state \
+  --format json
+
+# Apply requires the exact reviewed plan digest. Default adapter blocks live apply.
+./scripts/app-new.sh apply \
+  --config tests/fixtures/bootstrap/configs/agent-arena.cloudflare.json \
+  --template-revision 7f21f51209659a77fd56b19e6116f388e783d93d \
+  --state-root /tmp/app005-state \
+  --plan-digest 'sha256:…' \
+  --format json
+
+# Tests
+.venv/bin/python tests/app_initializer_test.py
+```
+
+### Safety contracts retained
+
+- Shared Supabase DB: `reference_only` in plan intents — create/delete forbidden.
+- Isolated `deployment.identity` / `deployment.stateKey` / `database.namespace` / hostname.
+- Secret **aliases** only in plans/manifests/logs; scaffold excludes `.env`, `.git`, `node_modules`, `state/`, `temp/`, `supabase/.temp`, `platforms.json`, and related paths.
+- Stale/tampered config hash or plan digest → fail closed.
+- Symlink / path-escape / unexpected overwrite → fail closed.
+- Exclusive per-app lock; contention → `runner.concurrent_rejected`.
+- Dry-run validates binding only and **does not** mark the durable manifest `completed`.
+- Workflows copy to `.github/workflows.pending/` (never auto-enabled).
+- Unresolved DNS and CloudFront block apply; Cloudflare is the only DNS choice that may proceed past the DNS gate (live DNS still unverified).
+
+### Deployment gate (explicit)
+
+`BlockedLiveApplyAdapter` is the shipped default. CLI `apply` without an injected live adapter returns `apply.live_integration_missing`. Do **not** treat fixture adapter success, metadata `externalVerification` flags, or dry-run OK as authorization to mutate production.
+
+### Files introduced by APP-005
+
+- `bootstrap/*.py` (engine, plan, scaffold, snapshot, adapters, manifest, lock, paths, …)
+- `bootstrap-manifest.schema.json`
+- `scripts/app-new.py` / `scripts/app-new.sh`
+- `tests/fixtures/bootstrap/**`
+- `tests/app_initializer_test.py`
+- `docs/bootstrap.md` (this section)
 
 ## Files introduced by APP-001
 
