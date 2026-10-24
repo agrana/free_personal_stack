@@ -79,7 +79,6 @@ jobs:
       TF_VAR_supabase_anon_key: ${{ secrets.SUPABASE_ANON_KEY }}
       TF_VAR_supabase_service_role_key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       TF_VAR_supabase_access_token: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      TF_VAR_supabase_project_id: ${{ steps.validate-secrets.outputs.project_id }}
       TF_VAR_approved_hostname: ${{ secrets.DOMAIN_NAME }}
       TF_VAR_domain_name: ${{ secrets.DOMAIN_NAME }}
       TF_VAR_app_url: ${{ secrets.APP_URL }}
@@ -176,6 +175,9 @@ jobs:
 
       - name: Terraform Plan
         id: plan
+        env:
+          # steps.* is invalid in job-level env; bind after validate-secrets.
+          TF_VAR_supabase_project_id: ${{ steps.validate-secrets.outputs.project_id }}
         run: |
           terraform plan -no-color -out=tfplan
           terraform show -json tfplan > tfplan.json

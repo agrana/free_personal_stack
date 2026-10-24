@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """APP-003 shared-database migration/access isolation tests.
 
-Unit checks always run. PostgreSQL integration runs only when a disposable
-local server is available (podman + postgres image) and APP003_PG_TESTS is
-not set to 0. Integration never reads DATABASE_URL / SUPABASE_DB_URL.
+Unit checks always run. PostgreSQL integration uses APP003_PG_TESTS modes:
+0=skip, 1=mandatory (provision failures are errors, not skips), auto=run when
+podman + image are available. Integration never reads DATABASE_URL /
+SUPABASE_DB_URL.
 """
 
 from __future__ import annotations
@@ -245,7 +246,11 @@ class SharedDbIsolationIntegrationTests(unittest.TestCase):
             text=True,
         )
         if run.returncode != 0:
-            raise unittest.SkipTest(f"podman run failed: {run.stderr.strip()}")
+            msg = f"podman run failed: {run.stderr.strip()}"
+            # APP003_PG_TESTS=1 is mandatory: report failure, do not skip green.
+            if RUN_PG == "1":
+                raise RuntimeError(msg)
+            raise unittest.SkipTest(msg)
         try:
             deadline = time.time() + 40
             import psycopg
@@ -258,7 +263,10 @@ class SharedDbIsolationIntegrationTests(unittest.TestCase):
                 except Exception:
                     time.sleep(0.5)
             else:
-                raise unittest.SkipTest("postgres did not become ready on loopback")
+                ready_msg = "postgres did not become ready on loopback"
+                if RUN_PG == "1":
+                    raise RuntimeError(ready_msg)
+                raise unittest.SkipTest(ready_msg)
 
             cls._bootstrap()
             for namespace, path in (("app_alpha", ALPHA_DIR), ("app_beta", BETA_DIR)):

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -65,6 +66,44 @@ CONFIG_ARENA = FIXTURE_ROOT / "configs" / "agent-arena.cloudflare.json"
 CONFIG_ARENA_UNRESOLVED = FIXTURE_ROOT / "configs" / "agent-arena.unresolved.json"
 CONFIG_BOARD = FIXTURE_ROOT / "configs" / "decisions-board.cloudflare.json"
 
+# Scoped overrides for temporary fixture clones/fetches. Background
+# `git maintenance` / `gc` (maintenance.autoDetach / gc.autoDetach) can race
+# TemporaryDirectory cleanup and raise OSError ENOTEMPTY on .git/objects.
+_FIXTURE_GIT_CONFIG_PAIRS: tuple[tuple[str, str], ...] = (
+    ("gc.auto", "0"),
+    ("gc.autoDetach", "false"),
+    ("maintenance.auto", "false"),
+    ("maintenance.autoDetach", "false"),
+)
+
+
+def _fixture_git_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Return env with deterministic, command-scoped git gc/maintenance off."""
+    env = dict(os.environ if base is None else base)
+    for key in list(env):
+        if key == "GIT_CONFIG_COUNT" or key.startswith("GIT_CONFIG_KEY_"):
+            del env[key]
+        elif key.startswith("GIT_CONFIG_VALUE_"):
+            del env[key]
+    env["GIT_CONFIG_COUNT"] = str(len(_FIXTURE_GIT_CONFIG_PAIRS))
+    for index, (config_key, config_value) in enumerate(_FIXTURE_GIT_CONFIG_PAIRS):
+        env[f"GIT_CONFIG_KEY_{index}"] = config_key
+        env[f"GIT_CONFIG_VALUE_{index}"] = config_value
+    return env
+
+
+def _run_fixture_git(
+    args: list[str],
+    **kwargs,
+) -> subprocess.CompletedProcess:
+    """Run git for temp fixtures with gc/maintenance auto+detach suppressed."""
+    env = kwargs.pop("env", None)
+    return subprocess.run(
+        ["git", *args],
+        env=_fixture_git_env(env),
+        **kwargs,
+    )
+
 
 def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -106,6 +145,149 @@ class SnapshotPinTests(unittest.TestCase):
         )
         self.assertTrue(digest.startswith("sha256:"))
         self.assertEqual(len(digest), len("sha256:") + 64)
+
+    def test_shallow_clone_misses_pin_until_full_history_available(self):
+        """Reproduce CI shallow-checkout failure; full history restores pin.
+
+        Does not weaken assert_git_commit_object — only proves history matter.
+        Uses an isolated file:// clone of this repo (no network).
+        Fixture git commands suppress auto/detached maintenance so tempfile
+        cleanup is not raced by background writes under .git/objects.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shallow = root / "shallow"
+            full = root / "full"
+            src = REPO_ROOT.resolve()
+            clone_shallow = _run_fixture_git(
+                [
+                    "clone",
+                    "--depth",
+                    "1",
+                    f"file://{src}",
+                    str(shallow),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(
+                clone_shallow.returncode,
+                0,
+                msg="shallow clone setup failed",
+            )
+            with self.assertRaises(InitializerError) as ctx:
+                assert_git_commit_object(shallow, PINNED_TEMPLATE_REVISION)
+            self.assertEqual(ctx.exception.code, ERR_TEMPLATE_SNAPSHOT)
+
+            clone_full = _run_fixture_git(
+                ["clone", f"file://{src}", str(full)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(
+                clone_full.returncode,
+                0,
+                msg="full-history clone setup failed",
+            )
+            rev = assert_git_commit_object(full, PINNED_TEMPLATE_REVISION)
+            self.assertEqual(rev, PINNED_TEMPLATE_REVISION)
+
+            # Same correction CI uses: deepen / fetch missing objects into the
+            # shallow clone without changing verification rules.
+            fetch_pin = _run_fixture_git(
+                [
+                    "-C",
+                    str(shallow),
+                    "fetch",
+                    "--depth",
+                    "1",
+                    "origin",
+                    PINNED_TEMPLATE_REVISION,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(
+                fetch_pin.returncode,
+                0,
+                msg="fetch of pinned revision into shallow clone failed",
+            )
+            rev_after = assert_git_commit_object(shallow, PINNED_TEMPLATE_REVISION)
+            self.assertEqual(rev_after, PINNED_TEMPLATE_REVISION)
+
+    def test_fixture_git_suppresses_detached_maintenance(self):
+        """Temp fixture git must not enable auto/detached maintenance or gc.
+
+        Guards against ENOTEMPTY races on TemporaryDirectory cleanup of
+        .git/objects after clone/fetch. Does not swallow cleanup errors.
+        """
+        env = _fixture_git_env()
+        self.assertEqual(env.get("GIT_CONFIG_COUNT"), "4")
+        for index, (config_key, config_value) in enumerate(_FIXTURE_GIT_CONFIG_PAIRS):
+            self.assertEqual(env.get(f"GIT_CONFIG_KEY_{index}"), config_key)
+            self.assertEqual(env.get(f"GIT_CONFIG_VALUE_{index}"), config_value)
+
+        # CI-like outer overrides that would otherwise re-enable auto maintenance.
+        hostile = dict(os.environ)
+        hostile["GIT_CONFIG_COUNT"] = "2"
+        hostile["GIT_CONFIG_KEY_0"] = "maintenance.auto"
+        hostile["GIT_CONFIG_VALUE_0"] = "true"
+        hostile["GIT_CONFIG_KEY_1"] = "gc.auto"
+        hostile["GIT_CONFIG_VALUE_1"] = "1"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            clone = root / "clone"
+            src = REPO_ROOT.resolve()
+            cloned = _run_fixture_git(
+                ["clone", "--depth", "1", f"file://{src}", str(clone)],
+                env=hostile,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(cloned.returncode, 0, msg=cloned.stderr)
+
+            # Local repo config may still default to auto; command-scoped
+            # overrides must win for every fixture git invocation.
+            for config_key, expected in (
+                ("maintenance.auto", "false"),
+                ("maintenance.autoDetach", "false"),
+                ("gc.auto", "0"),
+                ("gc.autoDetach", "false"),
+            ):
+                probed = _run_fixture_git(
+                    ["-C", str(clone), "config", "--get", config_key],
+                    env=hostile,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertEqual(probed.returncode, 0, msg=probed.stderr)
+                self.assertEqual(probed.stdout.strip(), expected)
+
+            fetched = _run_fixture_git(
+                ["-C", str(clone), "fetch", "--depth", "1", "origin", "HEAD"],
+                env=hostile,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(fetched.returncode, 0, msg=fetched.stderr)
+            objects_dir = clone / ".git" / "objects"
+            self.assertTrue(objects_dir.is_dir())
+            # No maintenance lock left that would imply a detached worker.
+            lock_paths = list(objects_dir.glob("**/*.lock"))
+            self.assertEqual(lock_paths, [])
 
 
 class OfflinePlanTests(unittest.TestCase):

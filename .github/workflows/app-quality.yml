@@ -1,0 +1,226 @@
+name: App Quality (APP-006)
+
+# Credential-free quality gates for lint, typecheck, unit tests, build, and
+# enforced deterministic security validation. Fork PRs never receive production
+# secrets. Does not deploy. Triggers on pull_request only (never the privileged
+# target variant).
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: app-quality-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+  # Synthetic public build fixtures only — labelled, not production keys.
+  # Anon key is generated at runtime (deterministic seed) so workflow source
+  # does not embed JWT-shaped literals that secret scanners flag.
+  NEXT_PUBLIC_SUPABASE_URL: https://abcdefghijklmnop.supabase.co
+  NEXT_PUBLIC_SITE_URL: https://arena.example.com
+  # Health revision uses server-side APP006_LOCAL_TEST_REVISION / VERCEL_GIT_COMMIT_SHA,
+  # not NEXT_PUBLIC_DEPLOYMENT_REVISION.
+  APP006_LOCAL_TEST_REVISION: abcdef0123456789abcdef0123456789abcdef01
+  APP003_PG_IMAGE: docker.io/library/postgres:16-alpine
+  # Harness-supported mandatory mode (0=skip, 1=mandatory, auto=if podman ready).
+  APP003_PG_TESTS: '1'
+  FREE_TIER_COMPATIBLE: 'true'
+
+jobs:
+  fork-pr-secret-guard:
+    name: Fork PR — no production secrets
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - name: Confirm credential-free quality path
+        run: |
+          echo "## APP-006 fork PR policy" >> "$GITHUB_STEP_SUMMARY"
+          echo "Quality gates run without production secrets on fork PRs." >> "$GITHUB_STEP_SUMMARY"
+          echo "No deploy, apply, or privileged migration steps in this workflow." >> "$GITHUB_STEP_SUMMARY"
+
+  quality:
+    name: Lint / typecheck / test / build / security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Initializer snapshot tests require the real pinned historical
+          # TEMPLATE_REVISION commit object from this repository. Default
+          # shallow checkout (fetch-depth: 1) omits that object and fails
+          # closed with template.snapshot_unverified — do not weaken
+          # bootstrap/snapshot.py verification to work around missing history.
+          fetch-depth: 0
+
+      - name: Synthetic public anon fixture (deterministic, non-JWT literal)
+        run: |
+          set -euo pipefail
+          ANON="fixture-anon-$(python3 -c 'import hashlib; print(hashlib.sha256(b"app006-ci-anon-seed").hexdigest())')"
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${ANON}" >> "$GITHUB_ENV"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pinned Python requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-bootstrap.txt
+
+      - name: Deterministic npm install (lockfile)
+        run: npm ci
+
+      - name: Provision disposable PostgreSQL for APP-003 harness (mandatory)
+        run: |
+          set -euo pipefail
+          echo "## APP-003 PostgreSQL (mandatory)" >> "$GITHUB_STEP_SUMMARY"
+          case "${APP003_PG_TESTS}" in
+            1)
+              echo "Harness mode APP003_PG_TESTS=1 (mandatory; auto-skip is not allowed)." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error::Expected harness-supported mandatory mode APP003_PG_TESTS=1 (supported: 0|1|auto)"
+              exit 1
+              ;;
+          esac
+          if ! command -v podman >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y podman
+          fi
+          podman pull "${APP003_PG_IMAGE}"
+          echo "Pulled disposable image ${APP003_PG_IMAGE}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run type-check
+
+      - name: Unit tests via unified runner (mandatory Postgres)
+        id: unit
+        run: |
+          set +e
+          OUTPUT_FILE="$(mktemp)"
+          npm test 2>&1 | tee "$OUTPUT_FILE"
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          if grep -qiE 'skipped.*disposable local PostgreSQL|PostgreSQL \(podman\) unavailable|podman.*unavailable' "$OUTPUT_FILE"; then
+            echo "::error::PostgreSQL integration skipped while APP003_PG_TESTS=1 (mandatory) — failing closed"
+            echo "postgres_skip=true" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "postgres_skip=false" >> "$GITHUB_OUTPUT"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "::error::Unit tests failed (unavailable dependencies must not be masked as pass)"
+            exit "$STATUS"
+          fi
+
+      - name: Build with synthetic public fixtures
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ env.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SITE_URL: ${{ env.NEXT_PUBLIC_SITE_URL }}
+          APP006_LOCAL_TEST_REVISION: ${{ env.APP006_LOCAL_TEST_REVISION }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}" ]; then
+            echo "::error::NEXT_PUBLIC_SUPABASE_ANON_KEY missing (expected runtime synthetic fixture)"
+            exit 1
+          fi
+          echo "Build uses labelled synthetic public fixtures only (not production keys)."
+          npm run build
+
+      - name: Health route HTTP smoke (real Next.js route)
+        env:
+          APP006_LOCAL_TEST_REVISION: ${{ env.APP006_LOCAL_TEST_REVISION }}
+        run: npm run test:health-http
+
+      - name: Enforced security validation (deterministic suites + synthetic built artifact)
+        run: |
+          set -euo pipefail
+          echo "## Enforced security validation" >> "$GITHUB_STEP_SUMMARY"
+          echo "Runs deterministic offline suites already covered by npm test, then scans a synthetic-built JS artifact." >> "$GITHUB_STEP_SUMMARY"
+          echo "claimsFullProductionBuild remains false — not production proof. No production secrets injected." >> "$GITHUB_STEP_SUMMARY"
+          echo "Tracked .secrets.baseline is not executed as a live secret scan in this job." >> "$GITHUB_STEP_SUMMARY"
+          ARTIFACT="$(find .next/static -type f -name '*.js' | head -n 1 || true)"
+          if [ -z "${ARTIFACT}" ]; then
+            echo "::error::No synthetic-built JS artifact under .next/static to scan"
+            exit 1
+          fi
+          ARTIFACT_PATH="$ARTIFACT" python - <<'PY'
+          import importlib.util
+          import os
+          import sys
+          from pathlib import Path
+
+          repo = Path(".").resolve()
+          artifact = Path(os.environ["ARTIFACT_PATH"])
+          if not artifact.is_file():
+              print("FAIL security.built_artifact_missing", file=sys.stderr)
+              sys.exit(1)
+
+          path = repo / "scripts" / "secrets-preflight.py"
+          spec = importlib.util.spec_from_file_location("secrets_preflight_ci", path)
+          assert spec and spec.loader
+          pref = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = pref
+          spec.loader.exec_module(pref)
+
+          canary = "srv_fixture_canary_not_in_browser_bundle_zzzz"
+          source = pref.CallerProvidedEnvSource(
+              {
+                  "SUPABASE_SERVICE_ROLE_KEY": canary,
+                  "SUPABASE_DATABASE_PASSWORD": "db_fixture_unused_yyyy",
+              }
+          )
+          errors: list = []
+          scan = pref._scan_browser_artifacts(
+              [str(artifact)],
+              source=source,
+              evidence_kind="built-bundle",
+              errors=errors,
+          )
+          if scan.get("claimsFullProductionBuild"):
+              print("FAIL security.claims_production_forbidden", file=sys.stderr)
+              sys.exit(1)
+          if scan.get("status") != "ok":
+              print("FAIL security.browser_scan", file=sys.stderr)
+              sys.exit(1)
+          if canary in (str(scan) + "".join(str(e) for e in errors)):
+              print("FAIL security.canary_leak_in_report", file=sys.stderr)
+              sys.exit(1)
+          print(
+              f"built_artifact_scan=ok evidenceKind={scan.get('evidenceKind')} "
+              f"claimsFullProductionBuild={scan.get('claimsFullProductionBuild')}"
+          )
+          PY
+
+      - name: Informative npm audit (non-gating)
+        run: |
+          echo "## Informative npm audit (non-gating)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Advisory dependency review only — not the enforced security validation step." >> "$GITHUB_STEP_SUMMARY"
+          echo "High+ findings here do not gate merge while free-tier lockfile upgrades remain out of scope." >> "$GITHUB_STEP_SUMMARY"
+          npm audit --audit-level=high || {
+            echo "::notice::npm audit reported findings (informative only; see enforced security step above)"
+            echo "npm_audit=findings_informative" >> "$GITHUB_STEP_SUMMARY"
+            true
+          }

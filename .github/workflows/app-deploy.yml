@@ -1,0 +1,212 @@
+name: App Deploy Gate (APP-006)
+
+# Reusable / manual deployment orchestration gate.
+# NOT automatic on push, pull_request, or main.
+# Explicit GitHub Environment "production" approval required for any mutate path.
+#
+# APP-005 offline initializer (plan/apply/resume + BlockedLiveApplyAdapter) is in
+# tree. Live cloud apply remains unavailable: apply.live_integration_missing.
+# This workflow is scaffold-only orchestration — it does NOT claim operational
+# automation and must not be re-enabled with fake hash-checks or boolean flags.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_ref:
+        description: 'Immutable reviewed git commit SHA (full 40-char hex)'
+        required: true
+        type: string
+      target_hostname:
+        description: 'Expected production hostname (FQDN metadata only)'
+        required: true
+        type: string
+      expected_revision:
+        description: 'Expected deployment revision (git SHA / public revision)'
+        required: true
+        type: string
+      vercel_project_id:
+        description: 'Distinct generated Vercel project id (must differ from SavedTube)'
+        required: true
+        type: string
+      run_migrations:
+        description: 'Coordinate scoped APP-003 migrations only (still gated; default false)'
+        required: false
+        type: boolean
+        default: false
+      free_tier_only:
+        description: 'Fail closed if paid-tier features are requested'
+        required: false
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      reviewed_ref:
+        required: true
+        type: string
+      target_hostname:
+        required: true
+        type: string
+      expected_revision:
+        required: true
+        type: string
+      vercel_project_id:
+        required: true
+        type: string
+      run_migrations:
+        required: false
+        type: boolean
+        default: false
+      free_tier_only:
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  APP006_DEPLOY_APPLY_DISABLED: 'true'
+  APP005_LIVE_ADAPTER_REQUIRED: 'true'
+  FREE_TIER_COMPATIBLE: 'true'
+  # Paid feature flag — keep false for free-tier compatibility.
+  PAID_FEATURES_ENABLED: 'false'
+
+jobs:
+  validate-inputs:
+    name: Safe validation (no apply)
+    runs-on: ubuntu-latest
+    outputs:
+      gate: ${{ steps.gate.outputs.status }}
+    steps:
+      - name: Validate immutable reviewed ref format
+        env:
+          REVIEWED_REF: ${{ inputs.reviewed_ref }}
+        run: |
+          echo "## Reviewed ref" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "${REVIEWED_REF}" ]; then
+            echo "::error::reviewed_ref required (immutable full commit SHA)"
+            exit 1
+          fi
+          case "${REVIEWED_REF}" in
+            *[!0-9a-fA-F]* | "")
+              echo "::error::reviewed_ref must be hexadecimal"
+              exit 1
+              ;;
+          esac
+          if [ "${#REVIEWED_REF}" -ne 40 ]; then
+            echo "::error::reviewed_ref must be a full 40-character commit SHA"
+            exit 1
+          fi
+          echo "Immutable reviewed ref format accepted (value not echoed)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Checkout immutable reviewed ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.reviewed_ref }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pinned Python requirements
+        run: python -m pip install -r requirements-bootstrap.txt
+
+      - name: Free-tier compatibility check
+        env:
+          FREE_TIER_ONLY: ${{ inputs.free_tier_only }}
+        run: |
+          echo "## Free-tier compatibility" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${FREE_TIER_ONLY}" = "true" ] && [ "${PAID_FEATURES_ENABLED}" = "true" ]; then
+            echo "::error::Paid features requested while free_tier_only=true"
+            exit 1
+          fi
+          echo "FREE_TIER_COMPATIBLE=${FREE_TIER_COMPATIBLE}; paid features remain disabled." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Distinct Vercel project identity (metadata only)
+        env:
+          VERCEL_PROJECT_ID_INPUT: ${{ inputs.vercel_project_id }}
+        run: |
+          echo "## Vercel project scope" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "${VERCEL_PROJECT_ID_INPUT}" ] || [ "${VERCEL_PROJECT_ID_INPUT}" = "unbound" ]; then
+            echo "::error::VERCEL project identity unbound — APP-005 plan must bind a distinct project"
+            exit 1
+          fi
+          echo "Received distinct project id input (value not echoed)." >> "$GITHUB_STEP_SUMMARY"
+          echo "SavedTube collision / live inventory still require a reviewed live adapter." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: APP-005 live-integration gate (scaffold-only)
+        id: gate
+        run: |
+          echo "## APP-006 deploy gate" >> "$GITHUB_STEP_SUMMARY"
+          echo "APP-005 offline initializer is present (scripts/app-new + bootstrap/)." >> "$GITHUB_STEP_SUMMARY"
+          echo "Shipped default adapter is BlockedLiveApplyAdapter → apply.live_integration_missing." >> "$GITHUB_STEP_SUMMARY"
+          echo "This workflow is **scaffold-only**: safe validation may run; live apply/deploy stays blocked." >> "$GITHUB_STEP_SUMMARY"
+          echo "- distinct Vercel project id (metadata) + reviewed plan digest (when live adapter exists)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- immutable reviewed git ref checkout (this job)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- coordinated scoped migrations via APP-003 harness only (no supabase db push)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Cloudflare DNS + Vercel hosting + one shared Supabase DB (SavedTube untouched)" >> "$GITHUB_STEP_SUMMARY"
+          echo "status=blocked_live_integration_missing" >> "$GITHUB_OUTPUT"
+          echo "gate=blocked_live_integration_missing"
+
+      - name: Local verify script dry syntax
+        run: |
+          python scripts/verify-deployment.py --help >/dev/null
+          test -x scripts/verify-deployment.sh || chmod +x scripts/verify-deployment.sh
+
+  production-approval-placeholder:
+    name: Production environment gate (explicit)
+    needs: validate-inputs
+    runs-on: ubuntu-latest
+    # environment: production is a configured admin prerequisite (protection rules /
+    # required reviewers). The keyword alone does not guarantee human approval.
+    environment: production
+    steps:
+      - name: Record explicit production approval context
+        run: |
+          echo "## Production environment" >> "$GITHUB_STEP_SUMMARY"
+          echo "GitHub Environment protection rules are a configured admin prerequisite — not guaranteed by the environment keyword alone." >> "$GITHUB_STEP_SUMMARY"
+          echo "Passing this job only records approval context when those rules exist — it does not deploy." >> "$GITHUB_STEP_SUMMARY"
+
+  apply-deploy:
+    name: Apply / deploy (disabled — live_integration_missing)
+    needs:
+      - validate-inputs
+      - production-approval-placeholder
+    runs-on: ubuntu-latest
+    environment: production
+    # Visibly blocked: APP-005 ships BlockedLiveApplyAdapter only (scaffold-only).
+    if: false
+    steps:
+      - name: Deploy disabled
+        run: |
+          echo "APP-006: apply/deploy disabled — apply.live_integration_missing (BlockedLiveApplyAdapter)."
+          echo "Do not re-enable with fake hash-checks or boolean live-evidence flags."
+          exit 1
+
+  scoped-migrations:
+    name: Scoped migrations coordination (disabled — live adapter missing)
+    needs:
+      - validate-inputs
+      - production-approval-placeholder
+    runs-on: ubuntu-latest
+    if: false
+    steps:
+      - name: Migrations not auto-applied
+        run: |
+          echo "APP-003/APP-006: coordinated scoped migrations only after reviewed live adapter + harness."
+          echo "Legacy deploy.yml supabase db push remains disabled."
+          exit 1
+
+  smoke-verify:
+    name: Post-deploy smoke (disabled — no live deploy)
+    needs: apply-deploy
+    runs-on: ubuntu-latest
+    if: false
+    steps:
+      - name: Smoke verification blocked
+        run: |
+          echo "HTTP health + browser acceptance require a real deployment (APP-007 / live path)."
+          echo "Local fixture checks are not genuine deployed health proof."
+          exit 1
