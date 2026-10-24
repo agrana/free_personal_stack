@@ -7,7 +7,13 @@ import os
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping, Optional
 
-from bootstrap.errors import ERR_SCHEMA, InitializerError
+from bootstrap.errors import ERR_SCHEMA, ERR_SYMLINK, InitializerError
+from bootstrap.safe_fs import (
+    ensure_owned_directory,
+    exclusive_create_file,
+    fsync_dir,
+    path_is_symlink,
+)
 
 try:
     from jsonschema import Draft202012Validator
@@ -107,27 +113,63 @@ def load_manifest(path: Path) -> dict:
 
 
 def atomic_write_text(path: Path, payload: str) -> None:
-    """Atomically replace path with payload (fsync file + best-effort dir)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Atomically replace path with payload (fsync file + best-effort dir).
+
+    Refuses symlink destinations and symlink parents; temp files are created
+    exclusively with O_NOFOLLOW / O_EXCL so truncation cannot escape the
+    owned directory via a planted link.
+    """
+    try:
+        ensure_owned_directory(path.parent)
+    except InitializerError:
+        raise
+    if path_is_symlink(path):
+        raise InitializerError(ERR_SYMLINK)
+    if path_is_symlink(path.parent):
+        raise InitializerError(ERR_SYMLINK)
     tmp_name = f".{path.name}.{os.getpid()}.tmp"
     tmp_path = path.parent / tmp_name
+    if path_is_symlink(tmp_path) or tmp_path.exists():
+        try:
+            if path_is_symlink(tmp_path):
+                raise InitializerError(ERR_SYMLINK)
+            tmp_path.unlink()
+        except InitializerError:
+            raise
+        except OSError:
+            raise InitializerError(ERR_SCHEMA) from None
+    fd: Optional[int] = None
     try:
-        with open(tmp_path, "w", encoding="utf-8") as fh:
+        fd = exclusive_create_file(tmp_path, mode=0o600)
+        with os.fdopen(fd, "w", encoding="utf-8", closefd=True) as fh:
+            fd = None
             fh.write(payload)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp_path, path)
+        if path_is_symlink(path) or path_is_symlink(tmp_path):
+            raise InitializerError(ERR_SYMLINK)
+        os.replace(str(tmp_path), str(path))
+        fsync_dir(path.parent)
+    except InitializerError:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         try:
-            dir_fd = os.open(str(path.parent), os.O_RDONLY)
+            if tmp_path.exists() and not path_is_symlink(tmp_path):
+                tmp_path.unlink()
         except OSError:
-            return
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
+            pass
+        raise
     except OSError:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         try:
-            if tmp_path.exists():
+            if tmp_path.exists() and not path_is_symlink(tmp_path):
                 tmp_path.unlink()
         except OSError:
             pass

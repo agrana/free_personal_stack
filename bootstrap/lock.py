@@ -8,7 +8,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Optional
 
-from bootstrap.errors import ERR_CONCURRENT, ERR_LOCK, ERR_LOCK_IO, InitializerError
+from bootstrap.errors import ERR_CONCURRENT, ERR_LOCK, ERR_LOCK_IO, ERR_SYMLINK, InitializerError
+from bootstrap.safe_fs import (
+    ensure_owned_directory,
+    open_existing_nofollow_rw,
+    open_nofollow,
+    path_is_symlink,
+)
 
 try:
     import fcntl
@@ -20,15 +26,31 @@ class AppLock:
     def __init__(self, lock_path: Path) -> None:
         self.lock_path = lock_path
         self._fh: Optional[object] = None
+        self._fd: Optional[int] = None
 
     def acquire(self, *, blocking: bool = False) -> None:
         if fcntl is None:
             raise InitializerError(ERR_LOCK_IO)
+        if path_is_symlink(self.lock_path):
+            raise InitializerError(ERR_SYMLINK)
         try:
-            self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-            fh = open(self.lock_path, "a+", encoding="utf-8")
+            ensure_owned_directory(self.lock_path.parent)
+            if self.lock_path.exists() or path_is_symlink(self.lock_path):
+                if path_is_symlink(self.lock_path):
+                    raise InitializerError(ERR_SYMLINK)
+                fd = open_existing_nofollow_rw(self.lock_path)
+            else:
+                flags = os.O_RDWR | os.O_CREAT
+                fd = open_nofollow(self.lock_path, flags=flags, mode=0o600)
+                # Re-check after create in case of race to a symlink replace.
+                if path_is_symlink(self.lock_path):
+                    os.close(fd)
+                    raise InitializerError(ERR_SYMLINK)
+        except InitializerError:
+            raise
         except OSError:
             raise InitializerError(ERR_LOCK_IO) from None
+        fh = os.fdopen(fd, "r+", encoding="utf-8", closefd=True)
         flags = fcntl.LOCK_EX
         if not blocking:
             flags |= fcntl.LOCK_NB
@@ -41,11 +63,18 @@ class AppLock:
             fh.close()
             raise InitializerError(ERR_LOCK) from None
         self._fh = fh
+        self._fd = fh.fileno()
         try:
+            if path_is_symlink(self.lock_path):
+                raise InitializerError(ERR_SYMLINK)
             fh.seek(0)
             fh.truncate()
             fh.write(f"pid={os.getpid()}\n")
             fh.flush()
+            os.fsync(fh.fileno())
+        except InitializerError:
+            self.release()
+            raise
         except OSError:
             self.release()
             raise InitializerError(ERR_LOCK_IO) from None
@@ -53,6 +82,7 @@ class AppLock:
     def release(self) -> None:
         fh = self._fh
         self._fh = None
+        self._fd = None
         if fh is None:
             return
         try:
