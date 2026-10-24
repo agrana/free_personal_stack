@@ -465,13 +465,27 @@ python3 -m venv .venv
 - Stale/tampered config hash or plan digest → fail closed.
 - Symlink / path-escape / unexpected overwrite → fail closed.
 - Exclusive per-app lock; contention → `runner.concurrent_rejected`.
-- Dry-run validates binding only and **does not** mark the durable manifest `completed`.
+- Dry-run revalidates reviewed bindings **and** on-disk generated-file hashes under the app lock; it **does not** mark the durable manifest `completed`.
 - Workflows copy to `.github/workflows.pending/` (never auto-enabled).
 - Unresolved DNS and CloudFront block apply; Cloudflare is the only DNS choice that may proceed past the DNS gate (live DNS still unverified).
 
+### APP-005 safety corrections (post source review)
+
+These are **local/offline** fail-closed behaviors. They do **not** prove live provider permissions or production readiness.
+
+| Correction | Supported guarantee | Remaining limitation |
+| --- | --- | --- |
+| Reviewed digest ↔ content | `planDigest` includes `contentSnapshotDigest` + `scaffoldDigest` from actual template/scaffold bytes; content changes with an unchanged declared revision invalidate the reviewed digest | Caller-supplied digest/revision strings are never trusted as content proof; the engine hashes what it reads |
+| Snapshot provenance / dirty policy | Git commit object required; when materializable paths exist in the pinned commit, on-disk bytes must match those blobs (`template.content_dirty` on mismatch/mixed provenance). Offline fixture trees with **zero** pin paths bind as `contentProvenance: offline_bound` via content digest only | Offline fixtures are not git-tree-verified; `require_git_content_match=True` refuses offline-bound mode. Full-tree materialization from the pin is not implemented |
+| Symlink-safe state/lock/temp | `ensure_owned_directory` validates **every lexical ancestor** with `is_symlink` before any create; lock/manifest opens use `O_NOFOLLOW` / exclusive temp create. Nested ancestors behind an existing real directory reached via a symlink parent are rejected without resolving the link away. External canaries must remain unchanged | Best-effort POSIX `nofollow` — **not** a full hostile concurrent filesystem sandbox. TOCTOU against a privileged concurrent attacker, hostile mount namespaces, and platforms without `O_NOFOLLOW` remain out of scope |
+| Interrupted checkpoint preserve | Compatible re-plan keeps `resourceIds` / remote `ensure_*` checkpoints; strips account/capability/inventory evidence so the current digest is rechecked before mutation; incompatible config/revision → `checkpoint.resource_reset_forbidden`. Malformed existing manifests fail closed (`manifest.schema_invalid`) instead of being dropped | Does not contact providers to re-verify remote ownership; fixture adapters only |
+| Generated-file edit detect | Owned scaffold files record content hashes; apply/resume/dry-run/completed noop re-read the generated set under the app lock and recompute `scaffoldDigest` against the reviewed plan. Edits/deletions/symlink replacements → `path.generated_content_modified` / `path.symlink_rejected` (non-destructive). Unchanged content re-plans idempotently | Ownership sidecar (`scaffold.owned.json`) is trusted local state under the private state root; validation refuses empty/mismatched sidecars rather than minting a new approving digest |
+| Capability binding | Mutations require a `CapabilityReport` with required capabilities `True` **and** matching `app_slug` / `config_hash` / `plan_digest` / `provider` / `operation`, established in the **current** apply/resume invocation. Completed `verify_capabilities` from a prior digest is never treated as live proof | Fixture `RecordingApplyAdapter` reports are **not** live permission proof. Shipped CLI still uses `BlockedLiveApplyAdapter` |
+| Completed resume bindings | `resume.noop` / `apply.noop` / `plan.noop` share the locked binding + generated-file validation path as apply (no unlocked fast path) | Same local binding surface; does not prove remote resource still exists |
+
 ### Deployment gate (explicit)
 
-`BlockedLiveApplyAdapter` is the shipped default. CLI `apply` without an injected live adapter returns `apply.live_integration_missing`. Do **not** treat fixture adapter success, metadata `externalVerification` flags, or dry-run OK as authorization to mutate production.
+`BlockedLiveApplyAdapter` is the shipped default. CLI `apply` without an injected live adapter returns `apply.live_integration_missing`. Do **not** treat fixture adapter success, metadata `externalVerification` flags, or dry-run OK as authorization to mutate production. Live apply / trust-boundary resolution remains **unresolved** until a reviewed live adapter lands.
 
 ### Files introduced by APP-005
 

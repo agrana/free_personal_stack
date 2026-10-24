@@ -35,6 +35,11 @@ class CapabilityReport:
 
     verified: Mapping[str, bool]
     operation_kind: str
+    app_slug: Optional[str] = None
+    config_hash: Optional[str] = None
+    plan_digest: Optional[str] = None
+    provider: Optional[str] = None
+    operation: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +60,8 @@ class ApplyContext:
     namespace: str
     known_resource_ids: Dict[str, Any]
     secret_aliases_present: Mapping[str, bool]
+    config_hash: Optional[str] = None
+    plan_digest: Optional[str] = None
 
 
 class ApplyAdapter(Protocol):
@@ -142,6 +149,11 @@ class RecordingApplyAdapter:
         return CapabilityReport(
             verified=dict(self.capabilities),
             operation_kind="provider_operation",
+            app_slug=ctx.app_slug,
+            config_hash=ctx.config_hash,
+            plan_digest=ctx.plan_digest,
+            provider="vercel",
+            operation="apply",
         )
 
     def inventory_conflicts(self, ctx: ApplyContext) -> ConflictInventory:
