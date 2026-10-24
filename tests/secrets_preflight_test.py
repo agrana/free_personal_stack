@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import io
 import json
@@ -519,7 +520,11 @@ class SecretsPreflightStaticDocsTests(unittest.TestCase):
 class SecretsPreflightCorrectionRegressions(unittest.TestCase):
     """Failing-first regressions for APP-004 correctness/security corrections."""
 
-    OPAQUE_TOKEN = "opaque_fixture_tok_9f3c2a1b7e44d880_xyz_not_jwt"
+    # Deterministic test-only synthetic: SHA256 of a fixed seed, prefixed fixture-.
+    # Built at import time so source contains no high-entropy secret literal.
+    OPAQUE_TOKEN = "fixture-" + hashlib.sha256(
+        b"secrets-preflight-correction-opaque-redaction-seed"
+    ).hexdigest()
 
     @classmethod
     def setUpClass(cls) -> None:
