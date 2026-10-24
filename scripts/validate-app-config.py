@@ -102,6 +102,9 @@ SCHEMA_KNOWN_KEYS = frozenset(
         "CONTACT_EMAIL_DESTINATION",
         "VERCEL_TEAM_ID",
         "CLOUDFLARE_ACCOUNT_ID",
+        "VERCEL_PROJECT_ID",
+        "SAVEDTUBE_VERCEL_PROJECT_ID",
+        "OPENAI_API_KEY",
     }
 )
 
@@ -334,6 +337,14 @@ def _check_secret_aliases(aliases: dict) -> List[str]:
         elif value != value.upper() or any(ch.islower() for ch in value):
             errors.append(
                 _reject_value(key_path, "alias values must be uppercase NAME tokens")
+            )
+        elif value != key:
+            # APP-004: remapping is prohibited; slot name must equal alias name.
+            errors.append(
+                _reject_value(
+                    key_path,
+                    "alias remapping prohibited; value must equal slot key",
+                )
             )
     return errors
 

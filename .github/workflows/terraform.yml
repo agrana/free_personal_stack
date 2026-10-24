@@ -39,17 +39,34 @@ permissions:
   actions: read
 
 jobs:
+  # APP-004: production secrets must never be injected into fork pull requests.
+  fork-pr-secret-guard:
+    name: APP-004 Fork PR Secret Guard
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name != github.repository
+    steps:
+      - name: Refuse secret-bearing plan on fork PRs
+        run: |
+          echo "## APP-004 fork PR secret policy" >> "$GITHUB_STEP_SUMMARY"
+          echo "Production secrets are not injected into fork pull requests." >> "$GITHUB_STEP_SUMMARY"
+          echo "Secret-bearing terraform plan is skipped for forks." >> "$GITHUB_STEP_SUMMARY"
+          echo "Preview credentials remain disabled / least privileged." >> "$GITHUB_STEP_SUMMARY"
+
   plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
     if: |
-      github.event_name == 'pull_request' ||
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name == 'pull_request' ||
       (github.event_name == 'push' &&
        github.event.before != null &&
        github.event.before != '' &&
        github.event.before != '0000000000000000000000000000000000000000') ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_command == 'plan')
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_command == 'plan'))
 
     defaults:
       run:

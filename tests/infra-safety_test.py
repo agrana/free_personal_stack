@@ -224,6 +224,20 @@ class InfraSafetyTests(unittest.TestCase):
         )
         self.assertIn("immutable", docs.lower())
 
+    def test_app004_fork_pr_secret_safeguard_and_preflight_surface(self):
+        wf = _read(".github/workflows/terraform.yml")
+        self.assertIn("APP-004", wf)
+        self.assertIn("head.repo.full_name", wf)
+        self.assertTrue((REPO_ROOT / "scripts" / "secrets-preflight.py").is_file())
+        self.assertTrue(
+            (REPO_ROOT / "examples" / "credential-binding.example.json").is_file()
+        )
+        docs = _read("docs/bootstrap.md")
+        self.assertIn("APP-004", docs)
+        self.assertIn("secrets-preflight", docs)
+        # Mutate paths must remain disabled (APP-004 must not re-enable deploy)
+        self.assertIn("if: false", wf)
+
 
 if __name__ == "__main__":
     unittest.main()

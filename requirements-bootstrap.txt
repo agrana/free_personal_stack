@@ -1,4 +1,4 @@
-# Pinned bootstrap deps for APP-001/002/003 (isolated venv only).
+# Pinned bootstrap deps for APP-001/002/003/004 (isolated venv only).
 # Do not install into the system/global Python interpreter.
 #
 #   python3 -m venv .venv
@@ -7,6 +7,7 @@
 #   .venv/bin/python tests/plan-guard_test.py
 #   .venv/bin/python tests/infra-safety_test.py
 #   .venv/bin/python tests/shared_db_isolation_test.py
+#   .venv/bin/python tests/secrets_preflight_test.py
 #
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
