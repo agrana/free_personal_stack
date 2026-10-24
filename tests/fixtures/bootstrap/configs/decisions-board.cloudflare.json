@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "app": {
+    "slug": "decisions-board"
+  },
+  "repository": {
+    "owner": "example-owner",
+    "name": "decisions-board"
+  },
+  "hostname": "decisions.example.com",
+  "database": {
+    "mode": "existing-project-shared",
+    "namespace": "decisions_board"
+  },
+  "deployment": {
+    "identity": "decisions-board",
+    "stateKey": "decisions-board"
+  },
+  "dns": {
+    "choice": "cloudflare"
+  },
+  "secretAliases": {
+    "CLOUDFLARE_API_TOKEN": "CLOUDFLARE_API_TOKEN",
+    "VERCEL_API_TOKEN": "VERCEL_API_TOKEN",
+    "SUPABASE_URL": "SUPABASE_URL",
+    "SUPABASE_ANON_KEY": "SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY": "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_ACCESS_TOKEN": "SUPABASE_ACCESS_TOKEN",
+    "TERRAFORM_STATE_PASSWORD": "TERRAFORM_STATE_PASSWORD"
+  },
+  "localConflictInventory": {
+    "slugs": ["savedtube", "agent-arena"],
+    "namespaces": ["savedtube", "agent_arena"],
+    "hostnames": ["savedtube.example.com", "arena.example.com"],
+    "deploymentIdentities": ["savedtube", "agent-arena"],
+    "stateKeys": ["savedtube", "agent-arena"]
+  },
+  "externalVerification": {
+    "accountPermissions": "unverified",
+    "sharedDatabaseGuard": "unverified",
+    "secretSource": "unverified",
+    "liveConflictDiscovery": "pending"
+  }
+}

@@ -1,0 +1,7 @@
+name: Fixture Workflow
+on: push
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo fixture

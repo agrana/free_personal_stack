@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/bootstrap-manifest.schema.json",
+  "title": "APP-005 secret-free bootstrap manifest",
+  "description": "Closed-field durable resume state for app initializer. IDs, hashes, and stage names only — never credentials, raw Terraform plans, URLs with userinfo, or provider response bodies.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "appSlug",
+    "configHash",
+    "templateRevision",
+    "planDigest",
+    "status",
+    "completedStages",
+    "resumeState",
+    "resourceIds",
+    "scaffold",
+    "gates"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "appSlug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,62}$"
+    },
+    "configHash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "templateRevision": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "planDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "planned",
+        "applying",
+        "completed",
+        "failed",
+        "interrupted"
+      ]
+    },
+    "completedStages": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "validate_inputs",
+          "materialize_scaffold",
+          "write_plan_artifact",
+          "verify_account_identity",
+          "verify_capabilities",
+          "inventory_conflicts",
+          "ensure_vercel_project",
+          "ensure_dns_records",
+          "bind_infra_state",
+          "finalize"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "resumeState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nextStage", "failureCode"],
+      "properties": {
+        "nextStage": {
+          "anyOf": [
+            {"type": "null"},
+            {
+              "type": "string",
+              "enum": [
+                "validate_inputs",
+                "materialize_scaffold",
+                "write_plan_artifact",
+                "verify_account_identity",
+                "verify_capabilities",
+                "inventory_conflicts",
+                "ensure_vercel_project",
+                "ensure_dns_records",
+                "bind_infra_state",
+                "finalize"
+              ]
+            }
+          ]
+        },
+        "failureCode": {
+          "anyOf": [
+            {"type": "null"},
+            {
+              "type": "string",
+              "pattern": "^[a-z0-9._-]{1,120}$"
+            }
+          ]
+        }
+      }
+    },
+    "resourceIds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "vercelProjectId",
+        "dnsRecordIds",
+        "infraStateKey"
+      ],
+      "properties": {
+        "vercelProjectId": {
+          "anyOf": [
+            {"type": "null"},
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9:_-]{1,128}$"
+            }
+          ]
+        },
+        "dnsRecordIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9:_-]{1,128}$"
+          },
+          "uniqueItems": true
+        },
+        "infraStateKey": {
+          "anyOf": [
+            {"type": "null"},
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,62}$"
+            }
+          ]
+        }
+      }
+    },
+    "scaffold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outputRoot", "fileCount", "scaffoldDigest"],
+      "properties": {
+        "outputRoot": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "fileCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scaffoldDigest": {
+          "anyOf": [
+            {"type": "null"},
+            {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          ]
+        }
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "liveApplyIntegrated",
+        "cloudfrontSupported",
+        "dnsResolved",
+        "rawTerraformPlanPersisted"
+      ],
+      "properties": {
+        "liveApplyIntegrated": {
+          "type": "boolean",
+          "const": false,
+          "description": "Shipped default cannot claim live provider apply is integrated."
+        },
+        "cloudfrontSupported": {
+          "type": "boolean",
+          "const": false
+        },
+        "dnsResolved": {
+          "type": "boolean"
+        },
+        "rawTerraformPlanPersisted": {
+          "type": "boolean",
+          "const": false,
+          "description": "Raw terraform plans may contain secrets and must never be stored in the manifest."
+        }
+      }
+    }
+  }
+}

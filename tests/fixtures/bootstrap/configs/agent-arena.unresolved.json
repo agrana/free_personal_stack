@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "app": {
+    "slug": "agent-arena"
+  },
+  "repository": {
+    "owner": "example-owner",
+    "name": "agent-arena"
+  },
+  "hostname": "arena.example.com",
+  "database": {
+    "mode": "existing-project-shared",
+    "namespace": "agent_arena"
+  },
+  "deployment": {
+    "identity": "agent-arena",
+    "stateKey": "agent-arena"
+  },
+  "dns": {
+    "choice": "unresolved"
+  },
+  "secretAliases": {
+    "CLOUDFLARE_API_TOKEN": "CLOUDFLARE_API_TOKEN",
+    "VERCEL_API_TOKEN": "VERCEL_API_TOKEN",
+    "SUPABASE_URL": "SUPABASE_URL",
+    "SUPABASE_ANON_KEY": "SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY": "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_ACCESS_TOKEN": "SUPABASE_ACCESS_TOKEN",
+    "TERRAFORM_STATE_PASSWORD": "TERRAFORM_STATE_PASSWORD"
+  },
+  "localConflictInventory": {
+    "slugs": ["savedtube"],
+    "namespaces": ["savedtube"],
+    "hostnames": ["savedtube.example.com"],
+    "deploymentIdentities": ["savedtube"],
+    "stateKeys": ["savedtube"]
+  },
+  "externalVerification": {
+    "accountPermissions": "unverified",
+    "sharedDatabaseGuard": "unverified",
+    "secretSource": "unverified",
+    "liveConflictDiscovery": "pending"
+  }
+}
