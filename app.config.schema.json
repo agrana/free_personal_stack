@@ -105,7 +105,7 @@
     },
     "secretAliases": {
       "type": "object",
-      "description": "Map of required secret slots to uppercase alias NAMES (not values). Aliases point at the approved original secure source used by SavedTube; never embed credentials here.",
+      "description": "Map of secret slots to uppercase alias NAMES (not values). Remapping is prohibited: each value MUST equal its slot key. Aliases point at the approved original secure source used by SavedTube; never embed credentials here.",
       "additionalProperties": false,
       "minProperties": 1,
       "required": [
@@ -133,7 +133,19 @@
         "SUPPORT_EMAIL_DESTINATION": { "$ref": "#/$defs/secretAliasName" },
         "CONTACT_EMAIL_DESTINATION": { "$ref": "#/$defs/secretAliasName" },
         "VERCEL_TEAM_ID": { "$ref": "#/$defs/secretAliasName" },
-        "CLOUDFLARE_ACCOUNT_ID": { "$ref": "#/$defs/secretAliasName" }
+        "CLOUDFLARE_ACCOUNT_ID": { "$ref": "#/$defs/secretAliasName" },
+        "VERCEL_PROJECT_ID": {
+          "$ref": "#/$defs/secretAliasName",
+          "description": "APP-004: per-app Vercel project id alias (must be distinct from SavedTube; unbound/missing is blocked, not success). Value must equal slot key (no remapping)."
+        },
+        "SAVEDTUBE_VERCEL_PROJECT_ID": {
+          "$ref": "#/$defs/secretAliasName",
+          "description": "APP-004: existing SavedTube Vercel project id alias for distinctness checks only. Value must equal slot key (no remapping)."
+        },
+        "OPENAI_API_KEY": {
+          "$ref": "#/$defs/secretAliasName",
+          "description": "APP-004 optional model API key alias. Omitted or absent is allowed; presence does not prove Codex or Decisions entitlement. Value must equal slot key (no remapping)."
+        }
       }
     },
     "localConflictInventory": {

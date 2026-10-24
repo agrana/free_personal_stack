@@ -1,11 +1,11 @@
-# App bootstrap contract (APP-001 + APP-002 + APP-003)
+# App bootstrap contract (APP-001 + APP-002 + APP-003 + APP-004)
 
 Pinned template revision: `7f21f51209659a77fd56b19e6116f388e783d93d`
 
-Branches: `feat/app-bootstrap-contract` (APP-001/002), `feat/shared-database-isolation` (APP-003)
+Branches: `feat/app-bootstrap-contract` (APP-001/002), `feat/shared-database-isolation` (APP-003), `feat/credential-preflight` (APP-004)
 
-Scope: reusable **non-secret** app configuration (APP-001), shared-project infrastructure hardening + offline plan guard (APP-002), and reusable shared-database migration/access isolation (APP-003).
-Not in scope: full plan/apply/resume automation (APP-005), product UI / live SavedTube cutover.
+Scope: reusable **non-secret** app configuration (APP-001), shared-project infrastructure hardening + offline plan guard (APP-002), reusable shared-database migration/access isolation (APP-003), and secure credential preflight/binding (APP-004).
+Not in scope: full plan/apply/resume automation (APP-005), product UI / live SavedTube cutover, creating a new Vercel project, or claiming live production credential readiness.
 
 ## What this contract is
 
@@ -155,6 +155,7 @@ Do **not** `pip install --user` or install into the global interpreter.
 
 # Tests (prefer the same venv)
 .venv/bin/python tests/config-validation_test.py
+.venv/bin/python tests/secrets_preflight_test.py
 ```
 
 The shell wrapper prefers `.venv/bin/python` when present.
@@ -323,13 +324,93 @@ Integration tests set `APP003_PG_TESTS=auto` (default): run when `podman` can us
 
 Use generic `example-owner` / `example.com` in documentation and examples (already used by APP-001 config examples).
 
+## APP-004 — secure credential preflight and binding
+
+Goal: resolve SavedTube credential **values** only from an authorized secure source supplied by a trusted launcher; report **presence** and **permission capabilities** (verified / unverified / blocked) without ever emitting secret values. Apps may reuse suitable Vercel token/scope, shared Supabase config, and an **optional** model key — but **must** use a distinct Vercel project ID.
+
+### What is implemented
+
+| Piece | Role |
+| --- | --- |
+| `scripts/secrets-preflight.py` (+ `.sh`) | Allowlisted alias resolution from caller-provided mapping; fixed-code JSON report |
+| `examples/credential-binding.example.json` | Reusable binding plan (alias names / generic `appId` targets only; no plaintext env export) |
+| `env.example` | Separates public `NEXT_PUBLIC_*` allowlist from server-only secrets |
+| `.github/workflows/terraform.yml` | Fork-PR guard: secret-bearing plan skipped for forks |
+| `tests/secrets_preflight_test.py` | Missing/invalid/redaction/collision/fork/public/browser/CLI regression cases |
+
+### Source interface (bounded)
+
+- **Allowed:** `CallerProvidedEnvSource` — in-memory mapping of allowlisted alias → **string** value from a trusted launcher. `None`/empty ⇒ missing; non-string types rejected (no `str(None)` coercion).
+- **CLI value transports (executable path):** `--values-stdin` (pipe JSON object) or `--values-env` (read **only** allowlisted alias names from the process environment — no environment dump). **`--values-json` is fixtures-only** (path must resolve under `tests/fixtures/`); never require secrets-on-disk for real runs.
+- **Consumes** alias **names** from `app.config` `secretAliases`. **Remapping is prohibited:** each alias value must equal its slot key (schema + validator + preflight). Optional APP-004 keys: `VERCEL_PROJECT_ID`, `SAVEDTUBE_VERCEL_PROJECT_ID`; `OPENAI_API_KEY` is **optional**.
+- **Disallowed:** arbitrary shell execution, automatic `.env`/home-store probing, environment dumps, persisting credentials, overwriting shared SavedTube secrets.
+- Values remain in **process memory** only. Artifacts contain presence + capabilities — no raw request URLs, response bodies, headers, exception messages, class names, or secret substrings. Probe failures emit fixed codes such as `probe.transport_error` only.
+
+### Identity and capability rules
+
+- Supabase refers to the **existing shared** project; `SUPABASE_SERVICE_ROLE_KEY` / DB password / access token are **server-only**.
+- Explicit distinct Vercel check: SavedTube existing ID vs prospective app ID. **Missing app Vercel project ID ⇒ blocked** (not success) until an initializer binds a new project. This task does **not** create that project.
+- Token **read** vs **write** are independent. A successful GET must never claim write ability.
+- `OPENAI_API_KEY` is optional; presence does **not** prove Codex or Decisions entitlement.
+- Public `NEXT_PUBLIC_*` configuration is a **strict key allowlist**, and public **values** must not equal any resolved server-only secret value.
+- Preview credentials default **disabled / least privileged**; production secrets are **never** injected into fork workflows.
+- Reports expose `localMetadataOk` separately from **`productionReady: false`** and **`deploymentAuthorized: false`**. Unverified capabilities never authorize deployment. Production credential capabilities remain explicitly **`unverified`** until an authorized read-only supervisor preflight runs. GitHub secret-**list** access is never evidence of secret-**value** access.
+
+### Network probes (opt-in)
+
+If enabled: fixed official allowlisted hosts only (`api.vercel.com`, `api.supabase.com`, `api.openai.com`), bounded timeout, TLS expected via transport, redirects rejected, schema-validated responses, tested with fixtures. This worker does **not** perform live provider calls; missing authorization/account facts fail closed. Exception paths never embed `str(exc)`, class names, or upstream bodies.
+
+### Browser secret-exclusion check
+
+Streams **supplied** artifact bytes with overlap (or rejects oversize visibly). Missing/empty/unreadable paths fail closed. **No supplied paths ⇒ `unverified`/`skipped`, never `ok`.** `claimsFullProductionBuild` is always false; `evidenceKind` is a caller label for supplied-artifact scan scope only — never proof of a full production build. Reports never print artifact contents or credential-bearing paths.
+
+### Commands
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-bootstrap.txt
+
+# Fixture / trusted-launcher values only — never point at real home credential stores
+.venv/bin/python tests/secrets_preflight_test.py
+
+# Preferred: stdin transport (no secrets-on-disk)
+./scripts/secrets-preflight.sh \
+  --aliases-json path/to/aliases.json \
+  --values-stdin \
+  --app-id example-app \
+  --format json < /path/from/trusted/launcher/pipe
+
+# Or allowlisted env names only (no dump)
+./scripts/secrets-preflight.sh \
+  --aliases-json path/to/aliases.json \
+  --values-env \
+  --app-id example-app \
+  --format json
+
+# Fixtures-only on-disk values (tests/fixtures/** only)
+./scripts/secrets-preflight.sh \
+  --aliases-json tests/fixtures/secrets_preflight/cli_aliases.json \
+  --values-json tests/fixtures/secrets_preflight/cli_values.json \
+  --format json
+```
+
+### Files introduced by APP-004
+
+- `scripts/secrets-preflight.py` / `scripts/secrets-preflight.sh`
+- `examples/credential-binding.example.json`
+- `tests/secrets_preflight_test.py`
+- `env.example` (public vs server-only separation)
+- `docs/bootstrap.md` (this section)
+- Minimal optional alias keys on `app.config.schema.json` (remapping prohibited)
+- Bounded fork-PR secret safeguard in `.github/workflows/terraform.yml`
+
 ## Blocking preflight items (explicit)
 
 These are **not** verified as live facts in APP-001/APP-002. Deployment-ready only requires the corresponding **metadata flags**. Callers must still perform independent live verification before apply:
 
 1. Live account/permission verification (`externalVerification.accountPermissions`) — **APP-005 must enforce**
 2. Shared-database preservation guard (`externalVerification.sharedDatabaseGuard`)
-3. Approved secret-source verification for aliases (`externalVerification.secretSource`)
+3. Approved secret-source verification for aliases (`externalVerification.secretSource`) — APP-004 provides local presence/binding preflight only; live supervisor verification remains required
 4. Live conflict discovery (`externalVerification.liveConflictDiscovery`)
 5. Resolved DNS choice (`dns.choice` ≠ `unresolved`)
 

