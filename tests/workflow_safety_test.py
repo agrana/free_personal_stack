@@ -39,6 +39,20 @@ class WorkflowSafetyTests(unittest.TestCase):
             self.assertIn(action, wf)
         self.assertNotRegex(wf, r"uses:\s*actions/[a-z-]+@main\b")
         self.assertNotRegex(wf, r"uses:\s*actions/[a-z-]+@master\b")
+        # Pin verification needs the historical TEMPLATE_REVISION commit object.
+        # Default actions/checkout shallow depth omits it; require full history.
+        self.assertRegex(
+            wf,
+            r"(?s)uses:\s*actions/checkout@v4\s*\n\s*with:\s*\n(?:\s*#[^\n]*\n)*\s*fetch-depth:\s*0\b",
+            msg="app-quality checkout must set fetch-depth: 0 for pinned template history",
+        )
+        self.assertNotRegex(
+            wf,
+            r"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+            msg="quality workflow must not hardcode JWT-shaped synthetic anon keys",
+        )
+        self.assertIn("app006-ci-anon-seed", wf)
+        self.assertIn("NEXT_PUBLIC_SUPABASE_ANON_KEY", wf)
         pkg = json.loads(_read("package.json"))
         engines = str(pkg.get("engines", {}).get("node", ""))
         self.assertIn("24", engines)
@@ -203,6 +217,8 @@ class WorkflowSafetyTests(unittest.TestCase):
         self.assertIn("process liveness", lowered)
         self.assertIn("APP006_LOCAL_TEST_REVISION", docs)
         self.assertIn("run-all-tests.py", docs)
+        self.assertIn("fetch-depth", docs)
+        self.assertIn("template.snapshot_unverified", docs)
         self.assertIn("configured admin prerequisite", lowered)
         self.assertIn("does not by itself guarantee", lowered)
         self.assertNotIn("app-new.py --deploy", docs)

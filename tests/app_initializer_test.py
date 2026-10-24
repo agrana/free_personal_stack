@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import tempfile
 import threading
 import unittest
@@ -106,6 +107,81 @@ class SnapshotPinTests(unittest.TestCase):
         )
         self.assertTrue(digest.startswith("sha256:"))
         self.assertEqual(len(digest), len("sha256:") + 64)
+
+    def test_shallow_clone_misses_pin_until_full_history_available(self):
+        """Reproduce CI shallow-checkout failure; full history restores pin.
+
+        Does not weaken assert_git_commit_object — only proves history matter.
+        Uses an isolated file:// clone of this repo (no network).
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shallow = root / "shallow"
+            full = root / "full"
+            src = REPO_ROOT.resolve()
+            clone_shallow = subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "--depth",
+                    "1",
+                    f"file://{src}",
+                    str(shallow),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(
+                clone_shallow.returncode,
+                0,
+                msg="shallow clone setup failed",
+            )
+            with self.assertRaises(InitializerError) as ctx:
+                assert_git_commit_object(shallow, PINNED_TEMPLATE_REVISION)
+            self.assertEqual(ctx.exception.code, ERR_TEMPLATE_SNAPSHOT)
+
+            clone_full = subprocess.run(
+                ["git", "clone", f"file://{src}", str(full)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(
+                clone_full.returncode,
+                0,
+                msg="full-history clone setup failed",
+            )
+            rev = assert_git_commit_object(full, PINNED_TEMPLATE_REVISION)
+            self.assertEqual(rev, PINNED_TEMPLATE_REVISION)
+
+            # Same correction CI uses: deepen / fetch missing objects into the
+            # shallow clone without changing verification rules.
+            fetch_pin = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(shallow),
+                    "fetch",
+                    "--depth",
+                    "1",
+                    "origin",
+                    PINNED_TEMPLATE_REVISION,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(
+                fetch_pin.returncode,
+                0,
+                msg="fetch of pinned revision into shallow clone failed",
+            )
+            rev_after = assert_git_commit_object(shallow, PINNED_TEMPLATE_REVISION)
+            self.assertEqual(rev_after, PINNED_TEMPLATE_REVISION)
 
 
 class OfflinePlanTests(unittest.TestCase):

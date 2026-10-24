@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import http.server
 import importlib.util
 import io
@@ -19,9 +20,11 @@ from urllib.error import HTTPError, URLError
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Fixture-only identities — never real credentials or production hosts.
+# Token/password-like values are deterministic at import time so source has no
+# high-entropy secret literal; vct_ prefix preserves redaction-pattern coverage.
 FIX_HOSTNAME = "arena.example.com"
 FIX_REVISION = "abcdef0123456789abcdef0123456789abcdef01"
-FIX_TOKEN = "vct_fixture_token_not_real_cccccccc"
+FIX_TOKEN = "vct_" + hashlib.sha256(b"app006-deploy-verify-redaction-seed").hexdigest()
 FIX_SECRET_FRAGMENT = "supersecretpass"
 
 

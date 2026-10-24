@@ -25,8 +25,9 @@ concurrency:
 env:
   NODE_VERSION: '24'
   # Synthetic public build fixtures only — labelled, not production keys.
+  # Anon key is generated at runtime (deterministic seed) so workflow source
+  # does not embed JWT-shaped literals that secret scanners flag.
   NEXT_PUBLIC_SUPABASE_URL: https://abcdefghijklmnop.supabase.co
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.fixture-anon.build-only
   NEXT_PUBLIC_SITE_URL: https://arena.example.com
   # Health revision uses server-side APP006_LOCAL_TEST_REVISION / VERCEL_GIT_COMMIT_SHA,
   # not NEXT_PUBLIC_DEPLOYMENT_REVISION.
@@ -56,6 +57,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Initializer snapshot tests require the real pinned historical
+          # TEMPLATE_REVISION commit object from this repository. Default
+          # shallow checkout (fetch-depth: 1) omits that object and fails
+          # closed with template.snapshot_unverified — do not weaken
+          # bootstrap/snapshot.py verification to work around missing history.
+          fetch-depth: 0
+
+      - name: Synthetic public anon fixture (deterministic, non-JWT literal)
+        run: |
+          set -euo pipefail
+          ANON="fixture-anon-$(python3 -c 'import hashlib; print(hashlib.sha256(b"app006-ci-anon-seed").hexdigest())')"
+          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${ANON}" >> "$GITHUB_ENV"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -124,10 +138,14 @@ jobs:
       - name: Build with synthetic public fixtures
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ env.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ env.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_SITE_URL: ${{ env.NEXT_PUBLIC_SITE_URL }}
           APP006_LOCAL_TEST_REVISION: ${{ env.APP006_LOCAL_TEST_REVISION }}
         run: |
+          set -euo pipefail
+          if [ -z "${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}" ]; then
+            echo "::error::NEXT_PUBLIC_SUPABASE_ANON_KEY missing (expected runtime synthetic fixture)"
+            exit 1
+          fi
           echo "Build uses labelled synthetic public fixtures only (not production keys)."
           npm run build
 

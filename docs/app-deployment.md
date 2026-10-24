@@ -52,6 +52,10 @@ Never call a fixture scan, synthetic build scan, or local loopback smoke “actu
 
 `app-quality.yml` runs on pull requests and pushes with least-privilege `contents: read`. It does **not** use `pull_request_target` and does **not** inject `secrets.*` production credentials into PR code. Actions are major-pinned (`@vN`); untrusted input is not interpolated into shell.
 
+Checkout uses **`fetch-depth: 0`**. Initializer snapshot tests call `assert_git_commit_object` against the real pinned historical `TEMPLATE_REVISION` commit in this repository; the default shallow checkout omits that object and fails closed with `template.snapshot_unverified`. Do **not** weaken snapshot verification to paper over missing history.
+
+Synthetic `NEXT_PUBLIC_SUPABASE_ANON_KEY` is generated at job runtime from a fixed seed (no JWT-shaped literal in the workflow file).
+
 Gates:
 
 1. **Lint** — `npm run lint`
