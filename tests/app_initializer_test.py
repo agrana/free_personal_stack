@@ -39,6 +39,7 @@ from bootstrap.errors import (  # noqa: E402
     ERR_GENERATED_EDIT,
     ERR_LIVE_CLAIM,
     ERR_LIVE_MISSING,
+    ERR_OUTPUT_ROOT,
     ERR_OVERWRITE,
     ERR_PATH_ESCAPE,
     ERR_PLAN_DIGEST,
@@ -1317,6 +1318,480 @@ class SafetyRegressionTests(unittest.TestCase):
                 )
             self.assertEqual(ctx.exception.code, ERR_SCHEMA)
             self.assertEqual(manifest_path.read_text(encoding="utf-8"), corrupt)
+
+
+class Pr12ScaffoldConsistencyTests(unittest.TestCase):
+    """PR #12 P2 findings — ownership reconcile + validate-before-write."""
+
+    def test_removed_source_file_reconciles_owned_hashes_for_apply_resume(self):
+        config = _load(CONFIG_ARENA)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staged = root / "template"
+            _copy_fixture_template(TEMPLATE_ROOT, staged)
+            first = plan_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                template_root=staged,
+                output_root=root / "out",
+                private_state_root=root / "state",
+            )
+            self.assertTrue(first.ok)
+            readme_out = root / "out" / "app" / "README.md"
+            self.assertTrue(readme_out.is_file())
+            (staged / "app" / "README.md").unlink()
+
+            second = plan_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                template_root=staged,
+                output_root=root / "out",
+                private_state_root=root / "state",
+            )
+            self.assertTrue(second.ok)
+            self.assertNotEqual(second.plan_digest, first.plan_digest)
+            self.assertFalse(readme_out.exists())
+
+            state_dir = root / "state" / "agent-arena"
+            owned = json.loads((state_dir / "scaffold.owned.json").read_text(encoding="utf-8"))
+            manifest = json.loads(
+                (state_dir / "bootstrap.manifest.json").read_text(encoding="utf-8")
+            )
+            owned_files = owned.get("files") or {}
+            self.assertNotIn("app/README.md", owned_files)
+            self.assertEqual(manifest["scaffold"]["fileCount"], len(owned_files))
+            self.assertEqual(
+                manifest["scaffold"]["scaffoldDigest"],
+                json.loads((state_dir / "reviewed.plan.json").read_text(encoding="utf-8"))[
+                    "scaffoldDigest"
+                ],
+            )
+
+            dry = apply_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                private_state_root=root / "state",
+                plan_digest=str(second.plan_digest),
+                adapter=BlockedLiveApplyAdapter(),
+                dry_run=True,
+            )
+            self.assertTrue(dry.ok)
+            self.assertEqual(dry.code, "apply.dry_run_ok")
+
+            applied = apply_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                private_state_root=root / "state",
+                plan_digest=str(second.plan_digest),
+                adapter=RecordingApplyAdapter(),
+            )
+            self.assertTrue(applied.ok)
+            self.assertEqual(applied.status, "completed")
+
+            resumed = resume_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                private_state_root=root / "state",
+                plan_digest=str(second.plan_digest),
+                adapter=RecordingApplyAdapter(),
+            )
+            self.assertTrue(resumed.ok)
+            self.assertEqual(resumed.code, "resume.noop")
+
+    def test_user_modified_removed_source_file_preserves_prior_state(self):
+        config = _load(CONFIG_ARENA)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staged = root / "template"
+            _copy_fixture_template(TEMPLATE_ROOT, staged)
+            first = plan_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                template_root=staged,
+                output_root=root / "out",
+                private_state_root=root / "state",
+            )
+            self.assertTrue(first.ok)
+            state_dir = root / "state" / "agent-arena"
+            prior_owned = (state_dir / "scaffold.owned.json").read_text(encoding="utf-8")
+            prior_manifest = (state_dir / "bootstrap.manifest.json").read_text(
+                encoding="utf-8"
+            )
+            prior_plan = (state_dir / "reviewed.plan.json").read_text(encoding="utf-8")
+            readme_out = root / "out" / "app" / "README.md"
+            prior_readme = readme_out.read_bytes()
+            readme_out.write_bytes(prior_readme + b"\nuser-kept-note\n")
+            (staged / "app" / "README.md").unlink()
+
+            with self.assertRaises(InitializerError) as ctx:
+                plan_app(
+                    config=config,
+                    template_revision=PINNED_TEMPLATE_REVISION,
+                    template_root=staged,
+                    output_root=root / "out",
+                    private_state_root=root / "state",
+                )
+            self.assertEqual(ctx.exception.code, ERR_GENERATED_EDIT)
+            self.assertEqual(
+                (state_dir / "scaffold.owned.json").read_text(encoding="utf-8"),
+                prior_owned,
+            )
+            self.assertEqual(
+                (state_dir / "bootstrap.manifest.json").read_text(encoding="utf-8"),
+                prior_manifest,
+            )
+            self.assertEqual(
+                (state_dir / "reviewed.plan.json").read_text(encoding="utf-8"),
+                prior_plan,
+            )
+            self.assertEqual(readme_out.read_bytes(), prior_readme + b"\nuser-kept-note\n")
+
+    def test_conflict_after_earlier_source_change_does_not_mutate_outputs(self):
+        config = _load(CONFIG_ARENA)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staged = root / "template"
+            _copy_fixture_template(TEMPLATE_ROOT, staged)
+            first = plan_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                template_root=staged,
+                output_root=root / "out",
+                private_state_root=root / "state",
+            )
+            self.assertTrue(first.ok)
+            state_dir = root / "state" / "agent-arena"
+            prior_owned = (state_dir / "scaffold.owned.json").read_text(encoding="utf-8")
+            prior_manifest = (state_dir / "bootstrap.manifest.json").read_text(
+                encoding="utf-8"
+            )
+            prior_plan = (state_dir / "reviewed.plan.json").read_text(encoding="utf-8")
+            readme_out = root / "out" / "app" / "README.md"
+            marker_out = root / "out" / ".github" / "WORKFLOWS_DISABLED_UNTIL_REVIEW"
+            prior_readme = readme_out.read_bytes()
+            prior_marker = marker_out.read_bytes()
+
+            readme_src = staged / "app" / "README.md"
+            readme_src.write_text(
+                readme_src.read_text(encoding="utf-8") + "source-bump\n",
+                encoding="utf-8",
+            )
+            marker_out.write_bytes(prior_marker + b"operator-edit\n")
+
+            with self.assertRaises(InitializerError) as ctx:
+                plan_app(
+                    config=config,
+                    template_revision=PINNED_TEMPLATE_REVISION,
+                    template_root=staged,
+                    output_root=root / "out",
+                    private_state_root=root / "state",
+                )
+            self.assertEqual(ctx.exception.code, ERR_GENERATED_EDIT)
+            self.assertEqual(readme_out.read_bytes(), prior_readme)
+            self.assertEqual(marker_out.read_bytes(), prior_marker + b"operator-edit\n")
+            self.assertEqual(
+                (state_dir / "scaffold.owned.json").read_text(encoding="utf-8"),
+                prior_owned,
+            )
+            self.assertEqual(
+                (state_dir / "bootstrap.manifest.json").read_text(encoding="utf-8"),
+                prior_manifest,
+            )
+            self.assertEqual(
+                (state_dir / "reviewed.plan.json").read_text(encoding="utf-8"),
+                prior_plan,
+            )
+
+            # Prior plan remains recoverable after the operator restores the marker.
+            marker_out.write_bytes(prior_marker)
+            dry = apply_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                private_state_root=root / "state",
+                plan_digest=str(first.plan_digest),
+                adapter=BlockedLiveApplyAdapter(),
+                dry_run=True,
+            )
+            self.assertTrue(dry.ok)
+            self.assertEqual(dry.code, "apply.dry_run_ok")
+
+    def test_metadata_write_failure_rolls_back_output_to_prior_owned(self):
+        import bootstrap.engine as engine_mod
+
+        config = _load(CONFIG_ARENA)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staged = root / "template"
+            _copy_fixture_template(TEMPLATE_ROOT, staged)
+            first = plan_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                template_root=staged,
+                output_root=root / "out",
+                private_state_root=root / "state",
+            )
+            self.assertTrue(first.ok)
+            state_dir = root / "state" / "agent-arena"
+            prior_owned = (state_dir / "scaffold.owned.json").read_text(encoding="utf-8")
+            prior_manifest = (state_dir / "bootstrap.manifest.json").read_text(
+                encoding="utf-8"
+            )
+            prior_plan = (state_dir / "reviewed.plan.json").read_text(encoding="utf-8")
+            readme_out = root / "out" / "app" / "README.md"
+            prior_readme = readme_out.read_bytes()
+
+            readme_src = staged / "app" / "README.md"
+            readme_src.write_text(
+                readme_src.read_text(encoding="utf-8") + "source-bump-meta\n",
+                encoding="utf-8",
+            )
+
+            real_atomic = engine_mod.atomic_write_text
+            plan_target = state_dir / "reviewed.plan.json"
+
+            def _fail_plan_write(path, payload):
+                if Path(path) == plan_target:
+                    raise OSError("injected-plan-persist-failure")
+                return real_atomic(path, payload)
+
+            engine_mod.atomic_write_text = _fail_plan_write  # type: ignore[assignment]
+            try:
+                with self.assertRaises(Exception):
+                    plan_app(
+                        config=config,
+                        template_revision=PINNED_TEMPLATE_REVISION,
+                        template_root=staged,
+                        output_root=root / "out",
+                        private_state_root=root / "state",
+                    )
+            finally:
+                engine_mod.atomic_write_text = real_atomic  # type: ignore[assignment]
+
+            self.assertEqual(readme_out.read_bytes(), prior_readme)
+            self.assertEqual(
+                (state_dir / "scaffold.owned.json").read_text(encoding="utf-8"),
+                prior_owned,
+            )
+            self.assertEqual(
+                (state_dir / "bootstrap.manifest.json").read_text(encoding="utf-8"),
+                prior_manifest,
+            )
+            self.assertEqual(
+                (state_dir / "reviewed.plan.json").read_text(encoding="utf-8"),
+                prior_plan,
+            )
+            dry = apply_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                private_state_root=root / "state",
+                plan_digest=str(first.plan_digest),
+                adapter=BlockedLiveApplyAdapter(),
+                dry_run=True,
+            )
+            self.assertTrue(dry.ok)
+            self.assertEqual(dry.code, "apply.dry_run_ok")
+
+    def test_new_file_post_replace_chmod_failure_leaves_no_unowned_output(self):
+        import bootstrap.scaffold as scaffold_mod
+
+        config = _load(CONFIG_ARENA)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staged = root / "template"
+            _copy_fixture_template(TEMPLATE_ROOT, staged)
+            first = plan_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                template_root=staged,
+                output_root=root / "out",
+                private_state_root=root / "state",
+            )
+            self.assertTrue(first.ok)
+            state_dir = root / "state" / "agent-arena"
+            prior_owned = (state_dir / "scaffold.owned.json").read_text(encoding="utf-8")
+            prior_manifest = (state_dir / "bootstrap.manifest.json").read_text(
+                encoding="utf-8"
+            )
+            prior_plan = (state_dir / "reviewed.plan.json").read_text(encoding="utf-8")
+            prior_content = (state_dir / "content.manifest.json").read_text(
+                encoding="utf-8"
+            )
+
+            zzz_src = staged / "app" / "zzz-new.txt"
+            zzz_src.write_text("brand-new-owned-file\n", encoding="utf-8")
+            zzz_out = root / "out" / "app" / "zzz-new.txt"
+            self.assertFalse(zzz_out.exists())
+
+            real_chmod = scaffold_mod.os.chmod
+
+            def _chmod_fail_zzz(path, mode, *args, **kwargs):
+                if Path(path) == zzz_out:
+                    raise OSError("injected-post-replace-chmod-failure")
+                return real_chmod(path, mode, *args, **kwargs)
+
+            scaffold_mod.os.chmod = _chmod_fail_zzz  # type: ignore[assignment]
+            try:
+                with self.assertRaises(InitializerError) as ctx:
+                    plan_app(
+                        config=config,
+                        template_revision=PINNED_TEMPLATE_REVISION,
+                        template_root=staged,
+                        output_root=root / "out",
+                        private_state_root=root / "state",
+                    )
+                self.assertEqual(ctx.exception.code, ERR_OUTPUT_ROOT)
+            finally:
+                scaffold_mod.os.chmod = real_chmod  # type: ignore[assignment]
+
+            self.assertFalse(zzz_out.exists())
+            self.assertEqual(
+                (state_dir / "scaffold.owned.json").read_text(encoding="utf-8"),
+                prior_owned,
+            )
+            self.assertEqual(
+                (state_dir / "bootstrap.manifest.json").read_text(encoding="utf-8"),
+                prior_manifest,
+            )
+            self.assertEqual(
+                (state_dir / "reviewed.plan.json").read_text(encoding="utf-8"),
+                prior_plan,
+            )
+            self.assertEqual(
+                (state_dir / "content.manifest.json").read_text(encoding="utf-8"),
+                prior_content,
+            )
+
+            third = plan_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                template_root=staged,
+                output_root=root / "out",
+                private_state_root=root / "state",
+            )
+            self.assertTrue(third.ok)
+            self.assertTrue(zzz_out.is_file())
+            dry = apply_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                private_state_root=root / "state",
+                plan_digest=str(third.plan_digest),
+                adapter=BlockedLiveApplyAdapter(),
+                dry_run=True,
+            )
+            self.assertTrue(dry.ok)
+            self.assertEqual(dry.code, "apply.dry_run_ok")
+
+    def test_existing_file_post_replace_fsync_failure_restores_prior_bytes(self):
+        import bootstrap.scaffold as scaffold_mod
+
+        config = _load(CONFIG_ARENA)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staged = root / "template"
+            out = root / "out"
+            _copy_fixture_template(TEMPLATE_ROOT, staged)
+            first = plan_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                template_root=staged,
+                output_root=out,
+                private_state_root=root / "state",
+            )
+            self.assertTrue(first.ok)
+            state_dir = root / "state" / "agent-arena"
+            prior_owned = (state_dir / "scaffold.owned.json").read_text(encoding="utf-8")
+            prior_manifest = (state_dir / "bootstrap.manifest.json").read_text(
+                encoding="utf-8"
+            )
+            prior_plan = (state_dir / "reviewed.plan.json").read_text(encoding="utf-8")
+            prior_content = (state_dir / "content.manifest.json").read_text(
+                encoding="utf-8"
+            )
+            owned_doc = json.loads(prior_owned)
+            raw_files = owned_doc.get("files") or {}
+            hashes = {
+                str(rel): str(digest)
+                for rel, digest in raw_files.items()
+                if isinstance(rel, str) and isinstance(digest, str)
+            }
+            owned = set(hashes)
+
+            readme_out = out / "app" / "README.md"
+            prior_readme = readme_out.read_bytes()
+            readme_src = staged / "app" / "README.md"
+            readme_src.write_text(
+                readme_src.read_text(encoding="utf-8") + "post-replace-fsync-bump\n",
+                encoding="utf-8",
+            )
+
+            real_fsync_dir = scaffold_mod.fsync_dir
+            baseline = {"bytes": prior_readme}
+
+            def _fsync_fail_when_readme_mutated(path):
+                if Path(path) == readme_out.parent:
+                    try:
+                        current = readme_out.read_bytes()
+                    except OSError:
+                        current = None
+                    if current is not None and current != baseline["bytes"]:
+                        raise OSError("injected-post-replace-fsync-failure")
+                return real_fsync_dir(path)
+
+            # Call materialize directly so engine metadata restore cannot mask the
+            # post-replace journal hole for an already-owned path.
+            scaffold_mod.fsync_dir = _fsync_fail_when_readme_mutated  # type: ignore[assignment]
+            try:
+                with self.assertRaises(InitializerError) as ctx:
+                    materialize_scaffold(
+                        template_root=staged,
+                        output_root=out,
+                        config=config,
+                        template_revision=PINNED_TEMPLATE_REVISION,
+                        owned_relative=owned,
+                        owned_hashes=hashes,
+                    )
+                self.assertEqual(ctx.exception.code, ERR_OUTPUT_ROOT)
+            finally:
+                scaffold_mod.fsync_dir = real_fsync_dir  # type: ignore[assignment]
+
+            self.assertEqual(readme_out.read_bytes(), prior_readme)
+            self.assertEqual(
+                (state_dir / "scaffold.owned.json").read_text(encoding="utf-8"),
+                prior_owned,
+            )
+            self.assertEqual(
+                (state_dir / "bootstrap.manifest.json").read_text(encoding="utf-8"),
+                prior_manifest,
+            )
+            self.assertEqual(
+                (state_dir / "reviewed.plan.json").read_text(encoding="utf-8"),
+                prior_plan,
+            )
+            self.assertEqual(
+                (state_dir / "content.manifest.json").read_text(encoding="utf-8"),
+                prior_content,
+            )
+
+            third = plan_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                template_root=staged,
+                output_root=out,
+                private_state_root=root / "state",
+            )
+            self.assertTrue(third.ok)
+            self.assertNotEqual(third.plan_digest, first.plan_digest)
+            self.assertIn(b"post-replace-fsync-bump\n", readme_out.read_bytes())
+            dry = apply_app(
+                config=config,
+                template_revision=PINNED_TEMPLATE_REVISION,
+                private_state_root=root / "state",
+                plan_digest=str(third.plan_digest),
+                adapter=BlockedLiveApplyAdapter(),
+                dry_run=True,
+            )
+            self.assertTrue(dry.ok)
+            self.assertEqual(dry.code, "apply.dry_run_ok")
 
 
 def _copy_fixture_template(src: Path, dst: Path) -> None:

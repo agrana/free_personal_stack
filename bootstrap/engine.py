@@ -32,6 +32,7 @@ from bootstrap.errors import (
     ERR_PLAN_MISSING,
     ERR_PLAN_REQUIRED,
     ERR_RESUME,
+    ERR_ROLLBACK_INCOMPLETE,
     ERR_STATUS,
     InterruptStage,
     InitializerError,
@@ -54,6 +55,7 @@ from bootstrap.plan import (
     refuse_raw_terraform_in_plan,
     require_pinned_revision,
 )
+from bootstrap.paths import safe_join
 from bootstrap.safe_fs import ensure_owned_directory, path_is_symlink
 from bootstrap.scaffold import materialize_scaffold, verify_owned_output_tree
 from bootstrap.snapshot import build_content_manifest
@@ -179,6 +181,118 @@ def _write_owned_record(path: Path, owned: Set[str], hashes: Mapping[str, str]) 
     )
 
 
+def _read_bytes_if_regular(path: Path) -> Optional[bytes]:
+    if path_is_symlink(path) or not path.is_file():
+        return None
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def _snapshot_owned_outputs(
+    output_root: Path, owned_hashes: Mapping[str, str]
+) -> Dict[str, bytes]:
+    snap: Dict[str, bytes] = {}
+    if not owned_hashes:
+        return snap
+    try:
+        root = output_root.resolve(strict=False)
+    except OSError:
+        return snap
+    if not root.is_dir():
+        return snap
+
+    for rel in owned_hashes:
+        if not isinstance(rel, str):
+            continue
+        try:
+            dest = safe_join(root, rel)
+        except InitializerError:
+            continue
+        data = _read_bytes_if_regular(dest)
+        if data is not None:
+            snap[rel] = data
+    return snap
+
+
+def _restore_bytes_file(path: Path, payload: Optional[bytes]) -> bool:
+    """Restore or remove a state file without going through atomic_write_text.
+
+    Rollback must not depend on the same persistence helper that may have failed
+    (or been fault-injected) during the forward path. Returns True on verified restore.
+    """
+    try:
+        if payload is None:
+            if path.exists() and not path_is_symlink(path):
+                path.unlink()
+            return not (path.exists() and path.is_file() and not path_is_symlink(path))
+        if path_is_symlink(path):
+            return False
+        if not path.parent.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        return path.is_file() and not path_is_symlink(path) and path.read_bytes() == payload
+    except OSError:
+        return False
+
+
+def _restore_plan_outputs(
+    *,
+    output_root: Path,
+    prior_files: Mapping[str, bytes],
+    prior_rels: Set[str],
+    new_rels: Set[str],
+    state_snapshots: Mapping[str, Optional[bytes]],
+) -> None:
+    """Restore scaffold outputs and plan metadata after a failed persist.
+
+    Verifies each restore step. Raises output.rollback_incomplete when a required
+    restore cannot be confirmed — this is not a crash-atomic guarantee.
+    """
+    incomplete = False
+    try:
+        root = output_root.resolve(strict=False)
+    except OSError:
+        root = output_root
+    for rel in sorted(new_rels - prior_rels):
+        try:
+            dest = safe_join(root, rel)
+        except InitializerError:
+            incomplete = True
+            continue
+        if dest.exists() and not path_is_symlink(dest):
+            try:
+                dest.unlink()
+            except OSError:
+                incomplete = True
+        if dest.exists() and dest.is_file() and not path_is_symlink(dest):
+            incomplete = True
+    for rel, data in prior_files.items():
+        try:
+            dest = safe_join(root, rel)
+        except InitializerError:
+            incomplete = True
+            continue
+        try:
+            if not dest.parent.exists():
+                dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
+            if not (
+                dest.is_file()
+                and not path_is_symlink(dest)
+                and dest.read_bytes() == data
+            ):
+                incomplete = True
+        except OSError:
+            incomplete = True
+    for path_key, payload in state_snapshots.items():
+        if not _restore_bytes_file(Path(path_key), payload):
+            incomplete = True
+    if incomplete:
+        raise InitializerError(ERR_ROLLBACK_INCOMPLETE)
+
+
 def _has_external_checkpoint(manifest: Mapping[str, Any]) -> bool:
     status = manifest.get("status")
     if status in {"interrupted", "applying", "failed"}:
@@ -299,97 +413,123 @@ def plan_app(
                 ):
                     raise InitializerError(ERR_CHECKPOINT_RESET)
 
-        (
-            file_count,
-            scaffold_digest,
-            owned,
-            owned_hashes,
-            content_digest,
-            content_provenance,
-        ) = materialize_scaffold(
-            template_root=template_root,
-            output_root=output_root,
-            config=config,
-            template_revision=template_revision,
-            owned_relative=owned,
-            owned_hashes=owned_hashes,
-        )
-
-        content_manifest = build_content_manifest(template_root)
-        content_manifest["contentSnapshotDigest"] = content_digest
-        content_manifest["contentProvenance"] = content_provenance
-        atomic_write_text(
-            _content_manifest_path(state_dir),
-            json.dumps(content_manifest, indent=2, sort_keys=True, ensure_ascii=True)
-            + "\n",
-        )
-
-        plan_doc = build_plan_document(
-            config=config,
-            template_revision=template_revision,
-            output_root=str(output_root),
-            repository_name=name,
-            repository_owner=owner,
-            intended_stages=list(ALL_STAGES),
-        )
-        # Bind actual template/scaffold contents into the reviewed digest.
-        plan_doc["contentSnapshotDigest"] = content_digest
-        plan_doc["scaffoldDigest"] = scaffold_digest
-        plan_doc["contentProvenance"] = content_provenance
-        plan_doc["contentManifest"] = {
-            "fileCount": len(content_manifest.get("files") or []),
-            "contentSnapshotDigest": content_digest,
-            "contentProvenance": content_provenance,
-        }
-        refuse_raw_terraform_in_plan(plan_doc)
-        digest = digest_for_review(plan_doc)
-        plan_doc["planDigest"] = digest
-
+        prior_rels = set(owned_hashes)
+        prior_files = _snapshot_owned_outputs(output_root, owned_hashes)
+        content_path = _content_manifest_path(state_dir)
         plan_file = _plan_path(state_dir)
-        atomic_write_text(
-            plan_file,
-            json.dumps(plan_doc, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
-        )
+        manifest_path = _manifest_path(state_dir)
+        state_snapshots = {
+            str(content_path): _read_bytes_if_regular(content_path),
+            str(plan_file): _read_bytes_if_regular(plan_file),
+            str(owned_path): _read_bytes_if_regular(owned_path),
+            str(manifest_path): _read_bytes_if_regular(manifest_path),
+        }
 
-        if prev_manifest is not None and _has_external_checkpoint(prev_manifest):
-            # Preserve remote ownership checkpoints; refresh local plan bindings only.
-            # Drop account/capability evidence bound to the prior digest/invocation.
-            manifest = dict(prev_manifest)
-            manifest["configHash"] = config_hash
-            manifest["templateRevision"] = template_revision
-            manifest["planDigest"] = digest
-            manifest["scaffold"] = {
-                "outputRoot": str(output_root.resolve()),
-                "fileCount": file_count,
-                "scaffoldDigest": scaffold_digest,
-            }
-            _strip_permission_stages(manifest)
-            if manifest.get("status") not in {"interrupted", "applying", "failed"}:
-                manifest["status"] = "interrupted"
-        else:
-            manifest = empty_manifest(
-                app_slug=slug,
-                config_hash=config_hash,
+        try:
+            (
+                file_count,
+                scaffold_digest,
+                owned,
+                owned_hashes,
+                content_digest,
+                content_provenance,
+            ) = materialize_scaffold(
+                template_root=template_root,
+                output_root=output_root,
+                config=config,
                 template_revision=template_revision,
-                plan_digest=digest,
-                output_root=str(output_root.resolve()),
-                dns_resolved=dns_choice != "unresolved",
+                owned_relative=owned,
+                owned_hashes=owned_hashes,
             )
-            for stage in LOCAL_STAGES:
-                mark_stage_complete(manifest, stage, _next_after(stage))
-            manifest["scaffold"] = {
-                "outputRoot": str(output_root.resolve()),
-                "fileCount": file_count,
-                "scaffoldDigest": scaffold_digest,
-            }
-            manifest["status"] = "planned"
-            manifest["resumeState"] = {
-                "nextStage": EXTERNAL_STAGES[0],
-                "failureCode": None,
-            }
 
-        _write_owned_record(owned_path, owned, owned_hashes)
-        atomic_write_manifest(_manifest_path(state_dir), manifest)
+            content_manifest = build_content_manifest(template_root)
+            content_manifest["contentSnapshotDigest"] = content_digest
+            content_manifest["contentProvenance"] = content_provenance
+            atomic_write_text(
+                content_path,
+                json.dumps(content_manifest, indent=2, sort_keys=True, ensure_ascii=True)
+                + "\n",
+            )
+
+            plan_doc = build_plan_document(
+                config=config,
+                template_revision=template_revision,
+                output_root=str(output_root),
+                repository_name=name,
+                repository_owner=owner,
+                intended_stages=list(ALL_STAGES),
+            )
+            # Bind actual template/scaffold contents into the reviewed digest.
+            plan_doc["contentSnapshotDigest"] = content_digest
+            plan_doc["scaffoldDigest"] = scaffold_digest
+            plan_doc["contentProvenance"] = content_provenance
+            plan_doc["contentManifest"] = {
+                "fileCount": len(content_manifest.get("files") or []),
+                "contentSnapshotDigest": content_digest,
+                "contentProvenance": content_provenance,
+            }
+            refuse_raw_terraform_in_plan(plan_doc)
+            digest = digest_for_review(plan_doc)
+            plan_doc["planDigest"] = digest
+
+            atomic_write_text(
+                plan_file,
+                json.dumps(plan_doc, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+            )
+
+            if prev_manifest is not None and _has_external_checkpoint(prev_manifest):
+                # Preserve remote ownership checkpoints; refresh local plan bindings only.
+                # Drop account/capability evidence bound to the prior digest/invocation.
+                manifest = dict(prev_manifest)
+                manifest["configHash"] = config_hash
+                manifest["templateRevision"] = template_revision
+                manifest["planDigest"] = digest
+                manifest["scaffold"] = {
+                    "outputRoot": str(output_root.resolve()),
+                    "fileCount": file_count,
+                    "scaffoldDigest": scaffold_digest,
+                }
+                _strip_permission_stages(manifest)
+                if manifest.get("status") not in {"interrupted", "applying", "failed"}:
+                    manifest["status"] = "interrupted"
+            else:
+                manifest = empty_manifest(
+                    app_slug=slug,
+                    config_hash=config_hash,
+                    template_revision=template_revision,
+                    plan_digest=digest,
+                    output_root=str(output_root.resolve()),
+                    dns_resolved=dns_choice != "unresolved",
+                )
+                for stage in LOCAL_STAGES:
+                    mark_stage_complete(manifest, stage, _next_after(stage))
+                manifest["scaffold"] = {
+                    "outputRoot": str(output_root.resolve()),
+                    "fileCount": file_count,
+                    "scaffoldDigest": scaffold_digest,
+                }
+                manifest["status"] = "planned"
+                manifest["resumeState"] = {
+                    "nextStage": EXTERNAL_STAGES[0],
+                    "failureCode": None,
+                }
+
+            _write_owned_record(owned_path, owned, owned_hashes)
+            atomic_write_manifest(manifest_path, manifest)
+        except Exception as exc:
+            try:
+                _restore_plan_outputs(
+                    output_root=output_root,
+                    prior_files=prior_files,
+                    prior_rels=prior_rels,
+                    new_rels=set(owned_hashes),
+                    state_snapshots=state_snapshots,
+                )
+            except InitializerError as rollback_exc:
+                if rollback_exc.code == ERR_ROLLBACK_INCOMPLETE:
+                    raise rollback_exc from exc
+                raise
+            raise
 
     return CommandResult(
         ok=True,
