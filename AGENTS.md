@@ -51,7 +51,7 @@ A valid configuration or metadata flag is not evidence of live ownership, permis
 
 ## Bootstrap and deployment gates
 
-`scripts/app-new.sh` provides `plan`, `apply` and `resume`; consult `--help` and `docs/bootstrap.md` for current flags. Planning generates local files and durable state, so use explicit output/state directories and preserve user edits. The initializer verifies pinned Git objects: shallow clones or generated repositories may lack required template history. Report that prerequisite and use the reviewed source; do not disable provenance checks or fetch an untrusted source.
+`scripts/app-new.sh` provides `plan`, `apply` and `resume`; consult `--help` and `docs/bootstrap.md` for current flags. Planning generates local files and durable state, so use explicit output/state directories and preserve user edits. The initializer verifies pinned Git objects: shallow clones or generated repositories may lack required template history. Report that prerequisite and materialize the exact `PINNED_TEMPLATE_REVISION` via `bootstrap.provenance.ensure_pinned_commit_object` from the allowlisted reviewed upstream (`DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL` / configured allowlisted `template` remote); do not disable provenance checks or fetch an untrusted source. See `docs/bootstrap.md` (Reviewed template source).
 
 The shipped live-apply adapter remains blocked with `apply.live_integration_missing`. Fixture adapters exercise orchestration only. Implementing or validating a live adapter is a separate reviewed task. Do not bypass disabled apply/destroy/reset commands or re-enable unattended shared-database migrations.
 

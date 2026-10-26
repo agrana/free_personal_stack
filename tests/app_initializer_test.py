@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+import unittest.mock
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -49,10 +50,20 @@ from bootstrap.errors import (  # noqa: E402
     ERR_TEMPLATE_DIRTY,
     ERR_TEMPLATE_REV,
     ERR_TEMPLATE_SNAPSHOT,
+    ERR_TEMPLATE_SOURCE_UNAVAILABLE,
+    ERR_TEMPLATE_SOURCE_UNTRUSTED,
     InitializerError,
 )
 from bootstrap.lock import AppLock, exclusive_app_lock  # noqa: E402
 from bootstrap.paths import iter_template_files  # noqa: E402
+from bootstrap.provenance import (  # noqa: E402
+    DEFAULT_REVIEWED_TEMPLATE_SOURCE_SSH,
+    DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL,
+    approve_reviewed_template_source,
+    ensure_pinned_commit_object,
+    is_reviewed_template_remote,
+    normalize_git_remote_identity,
+)
 from bootstrap.safe_fs import ensure_owned_directory  # noqa: E402
 from bootstrap.scaffold import materialize_scaffold  # noqa: E402
 from bootstrap.snapshot import (  # noqa: E402
@@ -109,6 +120,223 @@ def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _ensure_repo_pin_present() -> str:
+    """Materialize PINNED_TEMPLATE_REVISION into REPO_ROOT when missing.
+
+    No-op when the commit object is already present (common after CI ensure or
+    a fetched allowlisted ``template`` remote). Does not weaken snapshot checks.
+    """
+    try:
+        return assert_git_commit_object(REPO_ROOT, PINNED_TEMPLATE_REVISION)
+    except InitializerError:
+        pass
+    try:
+        return ensure_pinned_commit_object(
+            REPO_ROOT,
+            PINNED_TEMPLATE_REVISION,
+            remote_name="template",
+        )
+    except InitializerError:
+        return ensure_pinned_commit_object(
+            REPO_ROOT,
+            PINNED_TEMPLATE_REVISION,
+            reviewed_source_url=DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL,
+        )
+
+
+def setUpModule() -> None:
+    _ensure_repo_pin_present()
+
+
+def _git_commit(repo: Path, message: str) -> str:
+    committed = _run_fixture_git(
+        [
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=Synthetic Provenance",
+            "-c",
+            "user.email=provenance@example.test",
+            "commit",
+            "-m",
+            message,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if committed.returncode != 0:
+        raise AssertionError(f"synthetic commit failed: {committed.stderr}")
+    resolved = _run_fixture_git(
+        ["-C", str(repo), "rev-parse", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if resolved.returncode != 0:
+        raise AssertionError(resolved.stderr)
+    return resolved.stdout.strip().lower()
+
+
+def _build_synthetic_two_commit_history(root: Path) -> tuple[Path, str, str]:
+    """Isolated deterministic git history with distinct old/new commit objects."""
+    repo = root / "synthetic-history"
+    repo.mkdir()
+    init = _run_fixture_git(
+        ["-C", str(repo), "init"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if init.returncode != 0:
+        raise AssertionError(init.stderr)
+    (repo / "old.txt").write_text("old-revision\n", encoding="utf-8")
+    added = _run_fixture_git(
+        ["-C", str(repo), "add", "old.txt"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if added.returncode != 0:
+        raise AssertionError(added.stderr)
+    old_commit = _git_commit(repo, "synthetic-old")
+    (repo / "new.txt").write_text("new-revision\n", encoding="utf-8")
+    added_new = _run_fixture_git(
+        ["-C", str(repo), "add", "new.txt"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if added_new.returncode != 0:
+        raise AssertionError(added_new.stderr)
+    new_commit = _git_commit(repo, "synthetic-new")
+    if old_commit == new_commit:
+        raise AssertionError("synthetic history must yield distinct commits")
+    if len(old_commit) != 40 or len(new_commit) != 40:
+        raise AssertionError("synthetic commits must be full hashes")
+    return repo, old_commit, new_commit
+
+
+def _build_independent_generated_app_history(root: Path) -> Path:
+    """Temp repo whose history never advertises PINNED_TEMPLATE_REVISION.
+
+    Models a GitHub ``Use this template`` application checkout with its own
+    Initial commit. Portable on both the upstream template repository (where
+    REPO_ROOT already contains the pin) and independent generated-app histories.
+    Does not rewrite or weaken the exact pin; reviewed-source fixtures still
+    materialize the pin from pin_object_repo (typically REPO_ROOT).
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    repo = root / "generated-history"
+    repo.mkdir()
+    init = _run_fixture_git(
+        ["-C", str(repo), "init"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if init.returncode != 0:
+        raise AssertionError(init.stderr)
+    (repo / "README.md").write_text(
+        "independent-generated-app-initial\n", encoding="utf-8"
+    )
+    added = _run_fixture_git(
+        ["-C", str(repo), "add", "README.md"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if added.returncode != 0:
+        raise AssertionError(added.stderr)
+    tip = _git_commit(repo, "Initial commit")
+    if len(tip) != 40:
+        raise AssertionError("generated fixture tip must be a full hash")
+    if tip == PINNED_TEMPLATE_REVISION:
+        raise AssertionError("generated fixture must not collide with the pin")
+    try:
+        assert_git_commit_object(repo, PINNED_TEMPLATE_REVISION)
+    except InitializerError as exc:
+        if exc.code != ERR_TEMPLATE_SNAPSHOT:
+            raise
+    else:
+        raise AssertionError(
+            "independent generated fixture must not advertise the pin"
+        )
+    return repo
+
+
+def _clone_independent_generated_app(root: Path, name: str) -> Path:
+    """Clone an independent generated-app history into root/name."""
+    history = _build_independent_generated_app_history(root / f"{name}-src")
+    app = root / name
+    clone = _run_fixture_git(
+        ["clone", f"file://{history.resolve()}", str(app)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if clone.returncode != 0:
+        raise AssertionError(f"generated-app clone failed: {clone.stderr}")
+    try:
+        assert_git_commit_object(app, PINNED_TEMPLATE_REVISION)
+    except InitializerError as exc:
+        if exc.code != ERR_TEMPLATE_SNAPSHOT:
+            raise
+    else:
+        raise AssertionError("cloned generated app must not advertise the pin")
+    return app
+
+
+def _materialize_local_reviewed_pin_source(root: Path, pin_object_repo: Path) -> Path:
+    """Bare repo advertising PINNED_TEMPLATE_REVISION (local path fetch only)."""
+    assert_git_commit_object(pin_object_repo, PINNED_TEMPLATE_REVISION)
+    bare = root / "reviewed-template.git"
+    init = _run_fixture_git(
+        ["init", "--bare", str(bare)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if init.returncode != 0:
+        raise AssertionError(init.stderr)
+    fetched = _run_fixture_git(
+        [
+            "-C",
+            str(bare),
+            "fetch",
+            "--depth",
+            "1",
+            str(pin_object_repo.resolve()),
+            f"{PINNED_TEMPLATE_REVISION}:refs/heads/pinned-template",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if fetched.returncode != 0:
+        raise AssertionError(fetched.stderr)
+    tip = _run_fixture_git(
+        ["-C", str(bare), "rev-parse", "refs/heads/pinned-template"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if tip.returncode != 0 or tip.stdout.strip().lower() != PINNED_TEMPLATE_REVISION:
+        raise AssertionError("reviewed bare must advertise the exact pin")
+    return bare
+
+
 class SnapshotPinTests(unittest.TestCase):
     def test_git_commit_object_required_for_pin(self):
         rev = assert_git_commit_object(REPO_ROOT, PINNED_TEMPLATE_REVISION)
@@ -146,25 +374,25 @@ class SnapshotPinTests(unittest.TestCase):
         self.assertTrue(digest.startswith("sha256:"))
         self.assertEqual(len(digest), len("sha256:") + 64)
 
-    def test_shallow_clone_misses_pin_until_full_history_available(self):
-        """Reproduce CI shallow-checkout failure; full history restores pin.
+    def test_shallow_clone_misses_old_commit_until_full_history_available(self):
+        """Portable Git shallow-history regression (synthetic commits only).
 
-        Does not weaken assert_git_commit_object — only proves history matter.
-        Uses an isolated file:// clone of this repo (no network).
-        Fixture git commands suppress auto/detached maintenance so tempfile
-        cleanup is not raced by background writes under .git/objects.
+        Does not use PINNED_TEMPLATE_REVISION or network. Proves shallow clones
+        omit older commit objects and that a bounded exact-hash fetch restores
+        them without weakening assert_git_commit_object.
         """
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            history, old_commit, new_commit = _build_synthetic_two_commit_history(root)
+            self.assertNotEqual(old_commit, new_commit)
             shallow = root / "shallow"
             full = root / "full"
-            src = REPO_ROOT.resolve()
             clone_shallow = _run_fixture_git(
                 [
                     "clone",
                     "--depth",
                     "1",
-                    f"file://{src}",
+                    f"file://{history.resolve()}",
                     str(shallow),
                 ],
                 check=False,
@@ -177,12 +405,14 @@ class SnapshotPinTests(unittest.TestCase):
                 0,
                 msg="shallow clone setup failed",
             )
+            tip = assert_git_commit_object(shallow, new_commit)
+            self.assertEqual(tip, new_commit)
             with self.assertRaises(InitializerError) as ctx:
-                assert_git_commit_object(shallow, PINNED_TEMPLATE_REVISION)
+                assert_git_commit_object(shallow, old_commit)
             self.assertEqual(ctx.exception.code, ERR_TEMPLATE_SNAPSHOT)
 
             clone_full = _run_fixture_git(
-                ["clone", f"file://{src}", str(full)],
+                ["clone", f"file://{history.resolve()}", str(full)],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -193,12 +423,10 @@ class SnapshotPinTests(unittest.TestCase):
                 0,
                 msg="full-history clone setup failed",
             )
-            rev = assert_git_commit_object(full, PINNED_TEMPLATE_REVISION)
-            self.assertEqual(rev, PINNED_TEMPLATE_REVISION)
+            self.assertEqual(assert_git_commit_object(full, old_commit), old_commit)
+            self.assertEqual(assert_git_commit_object(full, new_commit), new_commit)
 
-            # Same correction CI uses: deepen / fetch missing objects into the
-            # shallow clone without changing verification rules.
-            fetch_pin = _run_fixture_git(
+            fetch_old = _run_fixture_git(
                 [
                     "-C",
                     str(shallow),
@@ -206,7 +434,7 @@ class SnapshotPinTests(unittest.TestCase):
                     "--depth",
                     "1",
                     "origin",
-                    PINNED_TEMPLATE_REVISION,
+                    old_commit,
                 ],
                 check=False,
                 capture_output=True,
@@ -214,12 +442,397 @@ class SnapshotPinTests(unittest.TestCase):
                 timeout=120,
             )
             self.assertEqual(
-                fetch_pin.returncode,
+                fetch_old.returncode,
                 0,
-                msg="fetch of pinned revision into shallow clone failed",
+                msg="fetch of old synthetic revision into shallow clone failed",
             )
-            rev_after = assert_git_commit_object(shallow, PINNED_TEMPLATE_REVISION)
-            self.assertEqual(rev_after, PINNED_TEMPLATE_REVISION)
+            self.assertEqual(assert_git_commit_object(shallow, old_commit), old_commit)
+
+    def test_reviewed_remote_identity_allowlist(self):
+        self.assertTrue(
+            is_reviewed_template_remote(DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL)
+        )
+        self.assertTrue(
+            is_reviewed_template_remote(
+                "git@github.com:agrana/free_personal_stack.git"
+            )
+        )
+        self.assertEqual(
+            approve_reviewed_template_source(
+                "https://github.com/agrana/free_personal_stack"
+            ),
+            DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL,
+        )
+        self.assertEqual(
+            approve_reviewed_template_source(
+                "git@github.com:agrana/free_personal_stack.git"
+            ),
+            DEFAULT_REVIEWED_TEMPLATE_SOURCE_SSH,
+        )
+        self.assertEqual(
+            normalize_git_remote_identity(
+                "git@github.com:agrana/free_personal_stack.git"
+            ),
+            "github.com/agrana/free_personal_stack",
+        )
+        self.assertFalse(
+            is_reviewed_template_remote("https://github.com/example/not-the-template.git")
+        )
+        self.assertFalse(is_reviewed_template_remote("file:///tmp/arbitrary.git"))
+
+    def test_reviewed_source_rejects_unsafe_transport_syntax(self):
+        """Allowlist requires complete supported HTTPS/SSH syntax only."""
+        rejected = (
+            "ftp://github.com/agrana/free_personal_stack.git",
+            "http://github.com/agrana/free_personal_stack.git",
+            "git://github.com/agrana/free_personal_stack.git",
+            "ssh://git@github.com/agrana/free_personal_stack.git",
+            "https://user:pass@github.com/agrana/free_personal_stack.git",
+            "https://user@github.com/agrana/free_personal_stack.git",
+            "https://github.com:8443/agrana/free_personal_stack.git",
+            "https://github.com:443/agrana/free_personal_stack.git",
+            "https://github.com/agrana/free_personal_stack.git?foo=1",
+            "https://github.com/agrana/free_personal_stack.git#frag",
+            "https://github.com/agrana/free_personal_stack.git ",
+            " https://github.com/agrana/free_personal_stack.git",
+            "https://github.com/agrana/free_personal_stack.git\n",
+            "ext::sh -c evil%github.com/agrana/free_personal_stack",
+            "git@github.com:agrana/free_personal_stack.git/../../../etc/passwd",
+            "git@github.com:other/free_personal_stack.git",
+            "https://github.com/agrana/free_personal_stack.git/extra",
+            "file:///tmp/agrana/free_personal_stack.git",
+        )
+        for source in rejected:
+            with self.subTest(source=source):
+                self.assertFalse(is_reviewed_template_remote(source))
+                with self.assertRaises(InitializerError) as ctx:
+                    approve_reviewed_template_source(source)
+                self.assertEqual(
+                    ctx.exception.code, ERR_TEMPLATE_SOURCE_UNTRUSTED
+                )
+
+    def test_ensure_pin_rejects_option_like_revision_without_fetch(self):
+        """Option-like revisions must fail before any git fetch spawn."""
+        fetch_calls: list[list[str]] = []
+        real_run = subprocess.run
+
+        def guarded_run(cmd, **kwargs):
+            if isinstance(cmd, (list, tuple)) and "fetch" in cmd:
+                fetch_calls.append(list(cmd))
+            return real_run(cmd, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp) / "app"
+            clone = _run_fixture_git(
+                ["clone", f"file://{REPO_ROOT.resolve()}", str(app)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(clone.returncode, 0, msg=clone.stderr)
+            with (
+                unittest.mock.patch(
+                    "bootstrap.provenance.subprocess.run", side_effect=guarded_run
+                ),
+                unittest.mock.patch(
+                    "bootstrap.snapshot.subprocess.run", side_effect=guarded_run
+                ),
+            ):
+                with self.assertRaises(InitializerError) as ctx:
+                    ensure_pinned_commit_object(
+                        app,
+                        "--upload-pack=evil",
+                        reviewed_source_url=DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL,
+                    )
+            self.assertEqual(ctx.exception.code, ERR_TEMPLATE_REV)
+            self.assertEqual(fetch_calls, [])
+
+    def test_ensure_pin_rejects_option_like_remote_without_fetch(self):
+        """Option-like remote names must fail before any git fetch spawn.
+
+        Validation runs even when the pin object is already present.
+        """
+        fetch_calls: list[list[str]] = []
+        real_run = subprocess.run
+
+        def guarded_run(cmd, **kwargs):
+            if isinstance(cmd, (list, tuple)) and "fetch" in cmd:
+                fetch_calls.append(list(cmd))
+            return real_run(cmd, **kwargs)
+
+        with (
+            unittest.mock.patch(
+                "bootstrap.provenance.subprocess.run", side_effect=guarded_run
+            ),
+            unittest.mock.patch(
+                "bootstrap.snapshot.subprocess.run", side_effect=guarded_run
+            ),
+        ):
+            with self.assertRaises(InitializerError) as present:
+                ensure_pinned_commit_object(
+                    REPO_ROOT,
+                    PINNED_TEMPLATE_REVISION,
+                    remote_name="--upload-pack=evil",
+                )
+            self.assertEqual(
+                present.exception.code, ERR_TEMPLATE_SOURCE_UNTRUSTED
+            )
+
+            with tempfile.TemporaryDirectory() as tmp:
+                app = _clone_independent_generated_app(Path(tmp), "app")
+                with self.assertRaises(InitializerError) as missing:
+                    ensure_pinned_commit_object(
+                        app,
+                        PINNED_TEMPLATE_REVISION,
+                        remote_name="--upload-pack=evil",
+                    )
+                self.assertEqual(
+                    missing.exception.code, ERR_TEMPLATE_SOURCE_UNTRUSTED
+                )
+        self.assertEqual(fetch_calls, [])
+
+    def test_ensure_pin_fetch_uses_canonical_approved_source(self):
+        """Fetch must receive the canonical approved URL, not raw variants."""
+        fetch_cmds: list[list[str]] = []
+        real_run = subprocess.run
+
+        def capture_run(cmd, **kwargs):
+            if isinstance(cmd, (list, tuple)) and "fetch" in cmd:
+                fetch_cmds.append(list(cmd))
+            return real_run(cmd, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = _clone_independent_generated_app(root, "generated-app")
+            reviewed = _materialize_local_reviewed_pin_source(root, REPO_ROOT)
+            _run_fixture_git(
+                [
+                    "-C",
+                    str(app),
+                    "config",
+                    f"url.file://{reviewed.resolve()}.insteadOf",
+                    DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            with unittest.mock.patch(
+                "bootstrap.provenance.subprocess.run", side_effect=capture_run
+            ):
+                rev = ensure_pinned_commit_object(
+                    app,
+                    PINNED_TEMPLATE_REVISION,
+                    reviewed_source_url=(
+                        "https://github.com/agrana/free_personal_stack"
+                    ),
+                )
+            self.assertEqual(rev, PINNED_TEMPLATE_REVISION)
+            self.assertEqual(len(fetch_cmds), 1)
+            self.assertIn(DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL, fetch_cmds[0])
+            self.assertNotIn(
+                "https://github.com/agrana/free_personal_stack",
+                fetch_cmds[0],
+            )
+            self.assertIn("--", fetch_cmds[0])
+            self.assertIn("protocol.allow=never", fetch_cmds[0])
+
+    def test_generated_repo_clone_lacks_pin_until_reviewed_source(self):
+        """Independent generated-app history does not advertise the upstream pin.
+
+        Uses a temporary fixture repo (not REPO_ROOT) so the regression holds on
+        both the upstream template history and generated-app checkouts.
+        Offline: refuse untrusted/wrong sources, then materialize the exact pin
+        from an allowlisted identity redirected to a local reviewed bare.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = _clone_independent_generated_app(root, "generated-app")
+            with self.assertRaises(InitializerError) as missing:
+                assert_git_commit_object(app, PINNED_TEMPLATE_REVISION)
+            self.assertEqual(missing.exception.code, ERR_TEMPLATE_SNAPSHOT)
+
+            with self.assertRaises(InitializerError) as untrusted:
+                ensure_pinned_commit_object(
+                    app,
+                    PINNED_TEMPLATE_REVISION,
+                    reviewed_source_url="https://github.com/example/untrusted.git",
+                )
+            self.assertEqual(
+                untrusted.exception.code, ERR_TEMPLATE_SOURCE_UNTRUSTED
+            )
+
+            wrong = root / "wrong-source.git"
+            init_wrong = _run_fixture_git(
+                ["init", "--bare", str(wrong)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(init_wrong.returncode, 0, msg=init_wrong.stderr)
+            donor = root / "wrong-work"
+            donor.mkdir()
+            _run_fixture_git(
+                ["-C", str(donor), "init"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            (donor / "only.txt").write_text("not-the-pin\n", encoding="utf-8")
+            _run_fixture_git(
+                ["-C", str(donor), "add", "only.txt"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            _git_commit(donor, "unrelated")
+            _run_fixture_git(
+                [
+                    "-C",
+                    str(wrong),
+                    "fetch",
+                    str(donor),
+                    "+refs/heads/*:refs/heads/*",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            _run_fixture_git(
+                [
+                    "-C",
+                    str(app),
+                    "config",
+                    f"url.file://{wrong.resolve()}.insteadOf",
+                    DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            with self.assertRaises(InitializerError) as wrong_src:
+                ensure_pinned_commit_object(
+                    app,
+                    PINNED_TEMPLATE_REVISION,
+                    reviewed_source_url=DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL,
+                )
+            self.assertEqual(
+                wrong_src.exception.code, ERR_TEMPLATE_SOURCE_UNAVAILABLE
+            )
+            with self.assertRaises(InitializerError) as still_missing:
+                assert_git_commit_object(app, PINNED_TEMPLATE_REVISION)
+            self.assertEqual(still_missing.exception.code, ERR_TEMPLATE_SNAPSHOT)
+
+            reviewed = _materialize_local_reviewed_pin_source(root, REPO_ROOT)
+            _run_fixture_git(
+                [
+                    "-C",
+                    str(app),
+                    "config",
+                    "--unset-all",
+                    f"url.file://{wrong.resolve()}.insteadOf",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            _run_fixture_git(
+                [
+                    "-C",
+                    str(app),
+                    "config",
+                    f"url.file://{reviewed.resolve()}.insteadOf",
+                    DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            rev = ensure_pinned_commit_object(
+                app,
+                PINNED_TEMPLATE_REVISION,
+                reviewed_source_url=DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL,
+            )
+            self.assertEqual(rev, PINNED_TEMPLATE_REVISION)
+            self.assertEqual(
+                assert_git_commit_object(app, PINNED_TEMPLATE_REVISION),
+                PINNED_TEMPLATE_REVISION,
+            )
+
+            app2 = _clone_independent_generated_app(root, "generated-app-2")
+            _run_fixture_git(
+                [
+                    "-C",
+                    str(app2),
+                    "remote",
+                    "add",
+                    "template",
+                    "https://github.com/example/untrusted.git",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            with self.assertRaises(InitializerError) as bad_remote:
+                ensure_pinned_commit_object(
+                    app2,
+                    PINNED_TEMPLATE_REVISION,
+                    remote_name="template",
+                )
+            self.assertEqual(
+                bad_remote.exception.code, ERR_TEMPLATE_SOURCE_UNTRUSTED
+            )
+
+    def test_ensure_pin_noops_when_already_present(self):
+        rev = ensure_pinned_commit_object(
+            REPO_ROOT,
+            PINNED_TEMPLATE_REVISION,
+            reviewed_source_url="https://github.com/example/would-be-rejected.git",
+        )
+        self.assertEqual(rev, PINNED_TEMPLATE_REVISION)
+
+    def test_ensure_pin_unavailable_reviewed_source_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = _clone_independent_generated_app(root, "empty-app")
+            empty = root / "empty.git"
+            _run_fixture_git(
+                ["init", "--bare", str(empty)],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            _run_fixture_git(
+                [
+                    "-C",
+                    str(app),
+                    "config",
+                    f"url.file://{empty.resolve()}.insteadOf",
+                    DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            with self.assertRaises(InitializerError) as ctx:
+                ensure_pinned_commit_object(
+                    app,
+                    PINNED_TEMPLATE_REVISION,
+                    reviewed_source_url=DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL,
+                )
+            self.assertEqual(ctx.exception.code, ERR_TEMPLATE_SOURCE_UNAVAILABLE)
 
     def test_fixture_git_suppresses_detached_maintenance(self):
         """Temp fixture git must not enable auto/detached maintenance or gc.

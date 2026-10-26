@@ -240,6 +240,37 @@ Honest limitation: fixture `RecordingApplyAdapter` tests prove orchestration con
 
 Pinning: `TEMPLATE_REVISION` markers are **never sufficient alone**. The controlling git repository must contain the pinned commit object (`git cat-file`), and materializable template contents are hashed into scaffold/plan digests.
 
+#### Reviewed template source (generated repositories)
+
+GitHub “Use this template” checkouts often have a single application `Initial commit` and therefore **cannot** resolve `PINNED_TEMPLATE_REVISION` from their own advertised history. Local developers and CI must materialize the exact commit object from a **reviewed** upstream identity before snapshot verification:
+
+```bash
+# Prefer an already-present object; otherwise bounded fetch of the exact hash.
+python - <<'PY'
+from pathlib import Path
+from bootstrap import PINNED_TEMPLATE_REVISION
+from bootstrap.provenance import (
+    DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL,
+    ensure_pinned_commit_object,
+)
+print(ensure_pinned_commit_object(
+    Path("."),
+    PINNED_TEMPLATE_REVISION,
+    reviewed_source_url=DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL,
+))
+PY
+```
+
+Rules:
+
+- Allowlisted identity only (`github.com/agrana/free_personal_stack`); see `REVIEWED_TEMPLATE_REMOTE_IDENTITIES` / `DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL` in `bootstrap/provenance.py`.
+- Supported source syntax only: HTTPS `https://github.com/agrana/free_personal_stack[.git]` or GitHub SCP-like SSH `git@github.com:agrana/free_personal_stack[.git]`. No other transports (`ftp`, `http`, `git`, `ssh://`, `file`, `ext::`, …), embedded HTTPS credentials, alternate ports, query/fragment, or control/whitespace. Approved inputs are rewritten to the canonical HTTPS or SSH URL before fetch; raw variants are never passed to git.
+- A configured `template` remote is accepted only when its URL matches that allowlist syntax. Remote names and the pin revision (full 40-char SHA) are validated before any git invocation.
+- Fetch is read-only and bounded (`git fetch --depth 1 -- <canonical-source> <exact-pin-hash>`) with command-scoped `protocol.allow=never` plus explicit `https`/`ssh` (and `file` for trusted local `url.*.insteadOf` redirects). No wholesale ancestry merge, pin rewrite, or marker-only trust.
+- Local Git configuration is **not** sandboxed: `url.*.insteadOf`, credential helpers, and other config in the invoking environment can still rewrite an approved URL after approval. Treat that configuration as trusted; do not claim arbitrary Git config is isolated by this allowlist.
+- Fail closed: `template.reviewed_source_untrusted`, `template.reviewed_source_unavailable`, `template.revision_mismatch`, or `template.snapshot_unverified`.
+- Portable Git shallow-history behavior is covered by synthetic two-commit fixture tests; those tests do **not** network and do **not** substitute for real pin provenance checks.
+
 ## APP-003 — shared-database migration / access isolation
 
 Goal: when multiple apps share **one** existing Supabase/Postgres database, each app can migrate and query only inside its own namespace, without touching Supabase CLI / SavedTube migration history, and without claiming isolation from a project-wide admin key.
@@ -477,7 +508,7 @@ These are **local/offline** fail-closed behaviors. They do **not** prove live pr
 | Correction | Supported guarantee | Remaining limitation |
 | --- | --- | --- |
 | Reviewed digest ↔ content | `planDigest` includes `contentSnapshotDigest` + `scaffoldDigest` from actual template/scaffold bytes; content changes with an unchanged declared revision invalidate the reviewed digest | Caller-supplied digest/revision strings are never trusted as content proof; the engine hashes what it reads |
-| Snapshot provenance / dirty policy | Git commit object required; when materializable paths exist in the pinned commit, on-disk bytes must match those blobs (`template.content_dirty` on mismatch/mixed provenance). Offline fixture trees with **zero** pin paths bind as `contentProvenance: offline_bound` via content digest only | Offline fixtures are not git-tree-verified; `require_git_content_match=True` refuses offline-bound mode. Full-tree materialization from the pin is not implemented |
+| Snapshot provenance / dirty policy | Git commit object required; when materializable paths exist in the pinned commit, on-disk bytes must match those blobs (`template.content_dirty` on mismatch/mixed provenance). Offline fixture trees with **zero** pin paths bind as `contentProvenance: offline_bound` via content digest only. Generated repos materialize the exact pin only via allowlisted `ensure_pinned_commit_object` | Offline fixtures are not git-tree-verified; `require_git_content_match=True` refuses offline-bound mode. Full-tree materialization from the pin is not implemented. Untrusted remotes / missing reviewed source fail closed |
 | Symlink-safe state/lock/temp | `ensure_owned_directory` validates **every lexical ancestor** with `is_symlink` before any create; lock/manifest opens use `O_NOFOLLOW` / exclusive temp create. Nested ancestors behind an existing real directory reached via a symlink parent are rejected without resolving the link away. External canaries must remain unchanged | Best-effort POSIX `nofollow` — **not** a full hostile concurrent filesystem sandbox. TOCTOU against a privileged concurrent attacker, hostile mount namespaces, and platforms without `O_NOFOLLOW` remain out of scope |
 | Interrupted checkpoint preserve | Compatible re-plan keeps `resourceIds` / remote `ensure_*` checkpoints; strips account/capability/inventory evidence so the current digest is rechecked before mutation; incompatible config/revision → `checkpoint.resource_reset_forbidden`. Malformed existing manifests fail closed (`manifest.schema_invalid`) instead of being dropped | Does not contact providers to re-verify remote ownership; fixture adapters only |
 | Generated-file edit detect | Owned scaffold files record content hashes; apply/resume/dry-run/completed noop re-read the generated set under the app lock and recompute `scaffoldDigest` against the reviewed plan. Edits/deletions/symlink replacements → `path.generated_content_modified` / `path.symlink_rejected` (non-destructive). Unchanged content re-plans idempotently | Ownership sidecar (`scaffold.owned.json`) is trusted local state under the private state root; validation refuses empty/mismatched sidecars rather than minting a new approving digest |
