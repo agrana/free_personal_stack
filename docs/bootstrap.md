@@ -81,7 +81,8 @@ Callers **must independently verify** live account permissions, shared-database 
 From `env.example` and workflow/docs references:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (preferred public key)
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` (legacy public key fallback)
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `NEXT_PUBLIC_SITE_URL`
 - `GOOGLE_CLIENT_ID`

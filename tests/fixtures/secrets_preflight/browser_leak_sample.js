@@ -1,1 +1,1 @@
-window.__LEAK__ = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.fixture.service';
+window.__LEAK__ = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYWJhc2UtZml4dHVyZSIsInJlZiI6InByZWZsaWdodC1zZXJ2aWNlIn0.bdeYlFFIy6dJ_B96Es8BzGdNfufANbY2AIq1knLJMgU';

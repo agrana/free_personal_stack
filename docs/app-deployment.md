@@ -54,7 +54,7 @@ Never call a fixture scan, synthetic build scan, or local loopback smoke “actu
 
 Checkout uses **`fetch-depth: 0`**. Initializer snapshot tests call `assert_git_commit_object` against the real pinned historical `TEMPLATE_REVISION` commit in this repository; the default shallow checkout omits that object and fails closed with `template.snapshot_unverified`. Do **not** weaken snapshot verification to paper over missing history.
 
-Synthetic `NEXT_PUBLIC_SUPABASE_ANON_KEY` is generated at job runtime from a fixed seed (no JWT-shaped literal in the workflow file).
+Synthetic `NEXT_PUBLIC_SUPABASE_ANON_KEY` is generated at job runtime from a fixed seed (no JWT-shaped literal in the workflow file). Runtime also accepts modern `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (preferred when nonempty).
 
 Gates:
 
@@ -74,7 +74,7 @@ APP-003 disposable Postgres integration uses harness-supported modes: `0` (skip)
 
 ### Frontend build and production keys
 
-`next.config.js` forwards `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` into the client bundle. A template build does **not** require genuine production keys when those public fixtures are supplied (as in CI). Server-only secrets must never be injected for quality builds.
+`next.config.js` resolves the public Supabase key (prefer `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, else legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY`), validates each configured candidate as public-class before inlining, and forwards URL plus the auth-helpers anon contract into the client bundle. Privileged modern-only, legacy-only or mixed configurations fail closed at that boundary with fixed error codes (no key material). A template build does **not** require genuine production keys when labelled synthetic public fixtures are supplied (as in CI). Server-only secrets must never be injected for quality builds.
 
 ### Browser secret-exclusion
 

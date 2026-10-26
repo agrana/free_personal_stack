@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import io
@@ -17,14 +18,32 @@ from typing import Any, Dict, Mapping, Optional
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "secrets_preflight"
 
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _runtime_jwt(*, role: str, seed: str) -> str:
+    """JWT-shaped fixture generated at runtime (no static key literals)."""
+    header = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    payload = _b64url(
+        json.dumps(
+            {"role": role, "iss": "supabase-fixture", "ref": seed},
+            separators=(",", ":"),
+        ).encode()
+    )
+    sig = _b64url(hashlib.sha256(f"{seed}:{role}".encode()).digest())
+    return f"{header}.{payload}.{sig}"
+
+
 # Fixture-only values — never real credentials.
 FIX_SAVEDTUBE_VERCEL_PROJECT_ID = "prj_savedtube_fixture_001"
 FIX_ARENA_VERCEL_PROJECT_ID = "prj_agent_arena_fixture_002"
 FIX_SUPABASE_PROJECT_ID = "abcdefghijklmnop"
 FIX_VERCEL_TOKEN = "vct_fixture_token_not_real_aaaaaaaa"
 FIX_OPENAI_KEY = "sk-fixture-openai-key-not-real-bbbbbbbb"
-FIX_SERVICE_ROLE = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.fixture.service"
-FIX_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.fixture.anon"
+FIX_SERVICE_ROLE = _runtime_jwt(role="service_role", seed="preflight-service")
+FIX_ANON = _runtime_jwt(role="anon", seed=FIX_SUPABASE_PROJECT_ID)
 FIX_SUPABASE_URL = f"https://{FIX_SUPABASE_PROJECT_ID}.supabase.co"
 FIX_URL_EMBEDDED = "https://user:supersecretpass@fixture.example.com/db"
 FIX_SECRET_BODY = f"leak:{FIX_VERCEL_TOKEN}:end"

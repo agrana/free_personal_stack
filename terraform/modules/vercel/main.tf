@@ -37,11 +37,20 @@ resource "vercel_project_domain" "main" {
 }
 
 resource "vercel_project_environment_variable" "env_vars" {
-  for_each = var.environment_variables
+  # Iterate allowlisted NAMES only. Index sensitive VALUES by key — never
+  # for_each over a map whose keys inherited sensitivity from secret values.
+  for_each = var.environment_variable_keys
 
   project_id = vercel_project.main.id
   team_id    = var.team_id != "" ? var.team_id : null
   key        = each.key
-  value      = each.value.value
-  target     = each.value.target
+  value      = var.environment_variables[each.key].value
+  target     = var.environment_variables[each.key].target
+
+  lifecycle {
+    precondition {
+      condition     = var.supabase_public_keys_safe
+      error_message = "Public Supabase key required with public-class syntax (sb_publishable_* and/or legacy anon JWT). Privileged sb_secret_*/service_role/supabase_admin values are rejected even when unequal to supabase_service_role_key. Modern and legacy may coexist with different values."
+    }
+  }
 }
