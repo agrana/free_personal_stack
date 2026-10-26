@@ -428,7 +428,8 @@ class CallerProvidedEnvSource:
                 continue
             if not isinstance(value, str):
                 raise SourceValidationError(ERR_INPUT_TYPE)
-            cleaned[key] = value
+            # A precreated entry is not a credential, in any validation path.
+            cleaned[key] = "" if value.strip() == "SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE" else value
         self._mapping = cleaned
 
     def resolve(self, alias: str) -> Optional[str]:
