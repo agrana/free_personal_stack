@@ -25,8 +25,10 @@ concurrency:
 env:
   NODE_VERSION: '24'
   # Synthetic public build fixtures only — labelled, not production keys.
-  # Anon key is generated at runtime (deterministic seed) so workflow source
-  # does not embed JWT-shaped literals that secret scanners flag.
+  # Public key is generated at runtime as sb_publishable_<sha256> from a fixed
+  # seed and exported on NEXT_PUBLIC_SUPABASE_ANON_KEY for auth-helpers alias
+  # compatibility. Avoids JWT-shaped literals that secret scanners flag, and
+  # satisfies strict JS/Python public-key parsers (fixture-anon-* does not).
   NEXT_PUBLIC_SUPABASE_URL: https://abcdefghijklmnop.supabase.co
   NEXT_PUBLIC_SITE_URL: https://arena.example.com
   # Health revision uses server-side APP006_LOCAL_TEST_REVISION / VERCEL_GIT_COMMIT_SHA,
@@ -65,10 +67,11 @@ jobs:
           # bootstrap/snapshot.py verification to work around missing history.
           fetch-depth: 0
 
-      - name: Synthetic public anon fixture (deterministic, non-JWT literal)
+      - name: Synthetic public publishable fixture (deterministic, non-JWT literal)
         run: |
           set -euo pipefail
-          ANON="fixture-anon-$(python3 -c 'import hashlib; print(hashlib.sha256(b"app006-ci-anon-seed").hexdigest())')"
+          # Runtime sb_publishable_<sha256> from fixed seed; alias on ANON_KEY.
+          ANON="sb_publishable_$(python3 -c 'import hashlib; print(hashlib.sha256(b"app006-ci-anon-seed").hexdigest())')"
           echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${ANON}" >> "$GITHUB_ENV"
 
       - name: Setup Node.js
@@ -86,6 +89,44 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-bootstrap.txt
+
+      # Generated application repositories have an independent Initial commit and
+      # do not advertise upstream template history. Snapshot tests require the
+      # exact PINNED_TEMPLATE_REVISION commit object. Materialize it only from
+      # the allowlisted reviewed upstream identity (bounded depth-1 fetch of the
+      # exact hash). No-op when the object is already present (template repos /
+      # fetch-depth: 0 with pin in ancestry). Do not weaken bootstrap/snapshot.py.
+      - name: Ensure pinned template commit object
+        env:
+          REVIEWED_TEMPLATE_SOURCE: https://github.com/agrana/free_personal_stack.git
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          from bootstrap import PINNED_TEMPLATE_REVISION
+          from bootstrap.provenance import (
+              DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL,
+              ensure_pinned_commit_object,
+              is_reviewed_template_remote,
+          )
+
+          source = os.environ.get(
+              "REVIEWED_TEMPLATE_SOURCE", DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL
+          ).strip()
+          if not is_reviewed_template_remote(source):
+              raise SystemExit("reviewed template source failed allowlist check")
+          if source != DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL:
+              raise SystemExit("CI must pin DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL")
+          rev = ensure_pinned_commit_object(
+              Path("."),
+              PINNED_TEMPLATE_REVISION,
+              reviewed_source_url=source,
+          )
+          if rev != PINNED_TEMPLATE_REVISION:
+              raise SystemExit("pinned revision mismatch after ensure")
+          print(f"pinned template commit present: {rev}")
+          PY
 
       - name: Deterministic npm install (lockfile)
         run: npm ci

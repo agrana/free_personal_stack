@@ -3,15 +3,102 @@
 
 from __future__ import annotations
 
+import hashlib
+import importlib.util
 import json
+import os
+import re
+import subprocess
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
+from typing import Dict, Mapping
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+APP_QUALITY_WORKFLOW = ".github/workflows/app-quality.yml"
+CI_ANON_SEED = b"app006-ci-anon-seed"
+LEGACY_INVALID_FIXTURE_PREFIX = "fixture-anon-"
 
 
 def _read(rel: str) -> str:
     return (REPO_ROOT / rel).read_text(encoding="utf-8")
+
+
+def _load_secrets_preflight():
+    path = REPO_ROOT / "scripts" / "secrets-preflight.py"
+    spec = importlib.util.spec_from_file_location("secrets_preflight_workflow_safety", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load {path}")
+    module = importlib.util.module_from_spec(spec)
+    import sys
+
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _extract_synthetic_fixture_run_block(wf: str) -> str:
+    """Return the shell body of the quality workflow synthetic public-key step."""
+    match = re.search(
+        r"(?m)^      - name: Synthetic public publishable fixture[^\n]*\n"
+        r"        run: \|\n"
+        r"((?:          [^\n]*\n)+)",
+        wf,
+    )
+    if match is None:
+        raise AssertionError(
+            "app-quality.yml missing Synthetic public publishable fixture run block"
+        )
+    lines = []
+    for raw in match.group(1).splitlines():
+        if not raw.startswith("          "):
+            raise AssertionError(f"unexpected indentation in fixture run block: {raw!r}")
+        lines.append(raw[10:])
+    script = "\n".join(lines).rstrip() + "\n"
+    if "app006-ci-anon-seed" not in script:
+        raise AssertionError("extracted fixture block lost deterministic seed")
+    if "NEXT_PUBLIC_SUPABASE_ANON_KEY" not in script:
+        raise AssertionError("extracted fixture block lost ANON_KEY alias export")
+    if LEGACY_INVALID_FIXTURE_PREFIX in script:
+        raise AssertionError("extracted fixture block still uses invalid fixture-anon- prefix")
+    if "sb_publishable_" not in script:
+        raise AssertionError("extracted fixture block must emit sb_publishable_ values")
+    return script
+
+
+def _parse_github_env(path: Path) -> Dict[str, str]:
+    values: Dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key] = value
+    return values
+
+
+def _node_assert_safe_public_env(env: Mapping[str, str]) -> subprocess.CompletedProcess:
+    script = textwrap.dedent(
+        """\
+        const m = require('./app/lib/supabasePublicKey.js');
+        try {
+          m.assertSafePublicSupabaseEnv(process.env, { requirePresent: true });
+          process.stdout.write('ok');
+        } catch (err) {
+          const code = (err && err.code) || (err && err.message) || 'error.unspecified';
+          process.stderr.write(String(code));
+          process.exit(2);
+        }
+        """
+    )
+    return subprocess.run(
+        ["node", "-e", script],
+        cwd=str(REPO_ROOT),
+        env={"PATH": os.environ.get("PATH", ""), **dict(env)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 class WorkflowSafetyTests(unittest.TestCase):
@@ -27,7 +114,7 @@ class WorkflowSafetyTests(unittest.TestCase):
         )
 
     def test_app_quality_workflow_exists_without_secrets_or_pr_target(self) -> None:
-        path = REPO_ROOT / ".github/workflows/app-quality.yml"
+        path = REPO_ROOT / APP_QUALITY_WORKFLOW
         self.assertTrue(path.is_file())
         wf = path.read_text(encoding="utf-8")
         self.assertNotIn("pull_request_target", wf)
@@ -46,6 +133,14 @@ class WorkflowSafetyTests(unittest.TestCase):
             r"(?s)uses:\s*actions/checkout@v4\s*\n\s*with:\s*\n(?:\s*#[^\n]*\n)*\s*fetch-depth:\s*0\b",
             msg="app-quality checkout must set fetch-depth: 0 for pinned template history",
         )
+        # Generated repos lack upstream ancestry; CI must materialize the exact
+        # pin from the allowlisted reviewed upstream identity only.
+        self.assertIn("Ensure pinned template commit object", wf)
+        self.assertIn("ensure_pinned_commit_object", wf)
+        self.assertIn("https://github.com/agrana/free_personal_stack.git", wf)
+        self.assertIn("PINNED_TEMPLATE_REVISION", wf)
+        self.assertIn("is_reviewed_template_remote", wf)
+        self.assertNotIn("template.snapshot_unverified — weaken", wf)
         self.assertNotRegex(
             wf,
             r"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
@@ -53,6 +148,18 @@ class WorkflowSafetyTests(unittest.TestCase):
         )
         self.assertIn("app006-ci-anon-seed", wf)
         self.assertIn("NEXT_PUBLIC_SUPABASE_ANON_KEY", wf)
+        self.assertIn("sb_publishable_", wf)
+        self.assertRegex(
+            wf,
+            r'ANON="sb_publishable_\$\(',
+            msg="quality workflow must generate sb_publishable_<sha256> at runtime",
+        )
+        self.assertNotRegex(
+            wf,
+            r'ANON="fixture-anon-',
+            msg="quality workflow must not generate invalid fixture-anon- public keys",
+        )
+        self.assertIn("Synthetic public publishable fixture", wf)
         pkg = json.loads(_read("package.json"))
         engines = str(pkg.get("engines", {}).get("node", ""))
         self.assertIn("24", engines)
@@ -93,6 +200,82 @@ class WorkflowSafetyTests(unittest.TestCase):
         self.assertNotIn("secrets.SUPABASE_SERVICE_ROLE_KEY", wf)
         self.assertIn("test:health-http", wf)
         self.assertIn("APP006_LOCAL_TEST_REVISION", wf)
+
+    def test_app_quality_synthetic_fixture_run_block_passes_real_public_key_validators(
+        self,
+    ) -> None:
+        """Execute the workflow's real fixture script; validators must accept output.
+
+        Also proves the retired fixture-anon-<sha256> shape fails the same
+        JS/Python parsers (no duplicated generator as the sole pass criterion).
+        """
+        wf = _read(APP_QUALITY_WORKFLOW)
+        script = _extract_synthetic_fixture_run_block(wf)
+        preflight = _load_secrets_preflight()
+        classify = preflight.classify_supabase_public_key
+        seed_digest = hashlib.sha256(CI_ANON_SEED).hexdigest()
+        retired = f"{LEGACY_INVALID_FIXTURE_PREFIX}{seed_digest}"
+
+        self.assertEqual(classify(retired), "malformed")
+        retired_js = _node_assert_safe_public_env(
+            {"NEXT_PUBLIC_SUPABASE_ANON_KEY": retired}
+        )
+        self.assertNotEqual(
+            retired_js.returncode,
+            0,
+            msg="retired fixture-anon- shape must fail assertSafePublicSupabaseEnv",
+        )
+        self.assertIn("public.config.supabase_key_malformed", retired_js.stderr)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            github_env = Path(tmp) / "github_env"
+            github_env.write_text("", encoding="utf-8")
+            isolated = {
+                "PATH": os.environ.get("PATH", ""),
+                "HOME": tmp,
+                "GITHUB_ENV": str(github_env),
+                "LC_ALL": "C",
+            }
+            proc = subprocess.run(
+                ["bash", "-c", script],
+                cwd=str(REPO_ROOT),
+                env=isolated,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                proc.returncode,
+                0,
+                msg=f"workflow fixture script failed: stdout={proc.stdout!r} stderr={proc.stderr!r}",
+            )
+            parsed = _parse_github_env(github_env)
+
+        anon = parsed.get("NEXT_PUBLIC_SUPABASE_ANON_KEY", "")
+        self.assertTrue(anon, "fixture script must export NEXT_PUBLIC_SUPABASE_ANON_KEY")
+        self.assertTrue(
+            anon.startswith("sb_publishable_"),
+            msg="workflow fixture must emit sb_publishable_* (not fixture-anon-*)",
+        )
+        self.assertNotIn(LEGACY_INVALID_FIXTURE_PREFIX, anon)
+        self.assertEqual(classify(anon), "public")
+        preds = preflight.terraform_public_key_predicates(
+            publishable="",
+            anon=anon,
+            service_role="",
+        )
+        self.assertTrue(
+            preds.get("public_keys_safe"),
+            msg=f"Python public-key predicates must accept workflow fixture: {preds}",
+        )
+
+        js = _node_assert_safe_public_env({"NEXT_PUBLIC_SUPABASE_ANON_KEY": anon})
+        self.assertEqual(
+            js.returncode,
+            0,
+            msg=f"assertSafePublicSupabaseEnv rejected workflow fixture: {js.stderr}",
+        )
+        self.assertEqual(js.stdout, "ok")
 
     def test_app_deploy_workflow_manual_gate_not_automatic(self) -> None:
         path = REPO_ROOT / ".github/workflows/app-deploy.yml"
