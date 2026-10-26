@@ -161,7 +161,7 @@ export default function AuthVerification({
               <ol className="list-decimal list-inside mt-1 space-y-1">
                 <li>Check that your Supabase project exists in the dashboard</li>
                 <li>Verify NEXT_PUBLIC_SUPABASE_URL in .env.local matches your project URL</li>
-                <li>Ensure NEXT_PUBLIC_SUPABASE_ANON_KEY is correct</li>
+                <li>Ensure NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY (or legacy NEXT_PUBLIC_SUPABASE_ANON_KEY) is correct</li>
                 <li>Restart your dev server after changing .env.local</li>
               </ol>
             </div>

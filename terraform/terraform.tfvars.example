@@ -23,7 +23,11 @@ enable_email_routing   = false
 
 # Shared Supabase project — reference only; never delete via Terraform
 supabase_url               = "https://your-shared-project.supabase.co"
-supabase_anon_key          = "your-supabase-anon-key"
+# Prefer modern publishable; legacy anon remains compatible and may differ.
+# Prefer one writer (integration or Terraform) per app-scoped env binding.
+# Never map service-role / sb_secret_* into public env bindings.
+supabase_publishable_key   = "your-supabase-publishable-key"
+# supabase_anon_key        = "your-supabase-anon-key"
 supabase_service_role_key  = "your-supabase-service-role-key"
 supabase_project_id        = "your-shared-project-id"
 enable_supabase_project_deletion = false

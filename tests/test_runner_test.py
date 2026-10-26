@@ -39,6 +39,8 @@ class TestRunnerCompletenessTests(unittest.TestCase):
             "tests/shared_db_isolation_test.py",
             "tests/app_initializer_test.py",
             "tests/secrets_preflight_test.py",
+            "tests/supabase_public_key_compat_test.py",
+            "tests/terraform_vercel_env_foreach_test.py",
             "tests/test_runner_test.py",
         ):
             self.assertIn(required, rels)

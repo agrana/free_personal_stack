@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { resolvePublicSupabaseKey } from '@/app/lib/supabasePublicEnv';
 
 interface ConfigCheckProps {
   onError: (error: string) => void;
@@ -20,7 +21,11 @@ export default function ConfigurationCheck({ onError }: ConfigCheckProps) {
   useEffect(() => {
     const checkConfig = () => {
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      const supabaseKey = resolvePublicSupabaseKey({
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:
+          process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      });
 
       const urlValid =
         supabaseUrl &&
@@ -32,7 +37,8 @@ export default function ConfigurationCheck({ onError }: ConfigCheckProps) {
         supabaseKey &&
         supabaseKey.length > 20 &&
         !supabaseKey.includes('your-') &&
-        supabaseKey !== 'your-supabase-anon-key';
+        supabaseKey !== 'your-supabase-anon-key' &&
+        supabaseKey !== 'your-supabase-publishable-key';
 
       setConfigStatus({
         supabaseUrl: !!urlValid,
@@ -67,7 +73,8 @@ export default function ConfigurationCheck({ onError }: ConfigCheckProps) {
           )}
           {!configStatus.supabaseKey && (
             <p>
-              ✗ <strong>NEXT_PUBLIC_SUPABASE_ANON_KEY</strong> is missing or
+              ✗ <strong>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</strong> (preferred) or
+              legacy <strong>NEXT_PUBLIC_SUPABASE_ANON_KEY</strong> is missing or
               incorrect in .env.local
             </p>
           )}
@@ -77,7 +84,7 @@ export default function ConfigurationCheck({ onError }: ConfigCheckProps) {
           <ol className="list-decimal list-inside space-y-1">
             <li>Create/update <code className="bg-red-100 px-1 rounded">.env.local</code> in the project root</li>
             <li>Add: <code className="bg-red-100 px-1 rounded">NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_ID.supabase.co</code></li>
-            <li>Add: <code className="bg-red-100 px-1 rounded">NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key</code></li>
+            <li>Add: <code className="bg-red-100 px-1 rounded">NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key</code> (or legacy <code className="bg-red-100 px-1 rounded">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>)</li>
             <li>Get values from: Supabase Dashboard → Project Settings → API</li>
             <li>Restart dev server: <code className="bg-red-100 px-1 rounded">npm run dev</code></li>
           </ol>
@@ -88,4 +95,3 @@ export default function ConfigurationCheck({ onError }: ConfigCheckProps) {
 
   return null;
 }
-

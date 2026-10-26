@@ -17,6 +17,7 @@ shared SavedTube secrets.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -104,8 +105,25 @@ PUBLIC_CONFIG_ALLOWLIST = frozenset(
     {
         "NEXT_PUBLIC_SUPABASE_URL",
         "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
         "NEXT_PUBLIC_SITE_URL",
     }
+)
+
+PUBLIC_SUPABASE_KEY_NAMES = frozenset(
+    {
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    }
+)
+
+PRIVILEGED_JWT_ROLES = frozenset({"service_role", "supabase_admin"})
+PUBLIC_JWT_ROLES = frozenset({"anon"})
+MAX_PUBLIC_KEY_CHARS = 8192
+PUBLISHABLE_KEY_RE = re.compile(r"^sb_publishable_[A-Za-z0-9_-]{16,}$")
+B64URL_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+SUPABASE_HOST_REF_RE = re.compile(
+    r"^https://([a-z0-9-]+)\.supabase\.co/?$", re.IGNORECASE
 )
 
 SERVER_ONLY_ALIASES = frozenset(
@@ -177,6 +195,10 @@ ERR_ALIAS_BLOCKED = "alias.resolution_blocked"
 ERR_URL_USERINFO = "supabase_url.embedded_userinfo_rejected"
 ERR_PUBLIC_ALLOWLIST = "public.config.allowlist_violation"
 ERR_PUBLIC_EXFIL = "public.config.server_only_value_exfiltration"
+ERR_PUBLIC_KEY_PRIVILEGED = "public.config.supabase_key_privileged"
+ERR_PUBLIC_KEY_MALFORMED = "public.config.supabase_key_malformed"
+ERR_PUBLIC_KEY_PROJECT_MISMATCH = "public.config.supabase_key_project_mismatch"
+ERR_ANON_KEY_TYPE = "supabase.anon_key.invalid_type"
 ERR_PERMISSIONS = "permissions.unknown_claim"
 ERR_PERMISSIONS_SHAPE = "permissions.invalid_claims_shape"
 ERR_ACCOUNT_SHAPE = "account.alignment.invalid_shape"
@@ -240,6 +262,144 @@ def redact_text(message: str) -> str:
     if len(redacted) > 240:
         redacted = redacted[:240] + "…"
     return redacted
+
+
+def resolve_public_supabase_key(env: Mapping[str, Any]) -> Optional[str]:
+    """Prefer modern publishable when nonempty; legacy anon only as fallback.
+
+    Public variable *names* never authorize server/service-role values — callers
+    must still run classify_supabase_public_key / preflight type checks.
+    """
+    if not isinstance(env, Mapping):
+        return None
+    modern_raw = env.get("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY")
+    modern = modern_raw.strip() if isinstance(modern_raw, str) else ""
+    if modern:
+        return modern
+    legacy_raw = env.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+    legacy = legacy_raw.strip() if isinstance(legacy_raw, str) else ""
+    return legacy or None
+
+
+def _b64url_json_object(segment: str) -> Optional[Dict[str, Any]]:
+    if not isinstance(segment, str) or not segment or not B64URL_SEGMENT_RE.fullmatch(segment):
+        return None
+    try:
+        padded = segment + ("=" * (-len(segment) % 4))
+        raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+        payload = json.loads(raw.decode("utf-8"))
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def classify_supabase_public_key(value: Any) -> str:
+    """Classify a candidate public Supabase API key. Fail closed.
+
+    Returns one of: public | privileged | malformed.
+    Supports syntactically valid sb_publishable_* and legacy anon JWTs only.
+    JWT parsing is type screening, not cryptographic verification.
+    Does not log or return key material.
+    """
+    if not isinstance(value, str):
+        return "malformed"
+    text = value.strip()
+    if len(text) < 16 or len(text) > MAX_PUBLIC_KEY_CHARS:
+        return "malformed"
+    lower = text.lower()
+    if lower.startswith("sb_secret_"):
+        return "privileged"
+    if PUBLISHABLE_KEY_RE.fullmatch(text):
+        return "public"
+    parts = text.split(".")
+    if len(parts) == 3 and parts[0].startswith("eyJ"):
+        header = _b64url_json_object(parts[0])
+        payload = _b64url_json_object(parts[1])
+        if header is None or payload is None:
+            return "malformed"
+        if not parts[2] or not B64URL_SEGMENT_RE.fullmatch(parts[2]):
+            return "malformed"
+        role = payload.get("role")
+        if not isinstance(role, str):
+            return "malformed"
+        if role in PRIVILEGED_JWT_ROLES:
+            return "privileged"
+        if role in PUBLIC_JWT_ROLES:
+            return "public"
+        return "malformed"
+    return "malformed"
+
+
+def _project_ref_from_url(url: Optional[str]) -> Optional[str]:
+    if not isinstance(url, str):
+        return None
+    match = SUPABASE_HOST_REF_RE.fullmatch(url.strip())
+    if not match:
+        return None
+    return match.group(1).lower()
+
+
+def _jwt_ref_claim(value: str) -> Optional[str]:
+    parts = value.strip().split(".")
+    if len(parts) != 3 or not parts[0].startswith("eyJ"):
+        return None
+    payload = _b64url_json_object(parts[1])
+    if payload is None:
+        return None
+    ref = payload.get("ref")
+    if not isinstance(ref, str) or not ref.strip():
+        return None
+    return ref.strip().lower()
+
+
+def assess_jwt_project_binding(env: Mapping[str, Any], key_value: str) -> str:
+    """Return ok | mismatch | unknown for JWT ref vs configured URL/project id.
+
+    Key strings alone never prove same-project binding; live preflight required.
+    """
+    jwt_ref = _jwt_ref_claim(key_value)
+    if jwt_ref is None:
+        return "unknown"
+    from_url = _project_ref_from_url(
+        env.get("NEXT_PUBLIC_SUPABASE_URL") if isinstance(env, Mapping) else None
+    ) or _project_ref_from_url(env.get("SUPABASE_URL") if isinstance(env, Mapping) else None)
+    project_id = env.get("SUPABASE_PROJECT_ID") if isinstance(env, Mapping) else None
+    from_id = (
+        project_id.strip().lower()
+        if isinstance(project_id, str) and project_id.strip()
+        else None
+    )
+    configured = from_url or from_id
+    if not configured:
+        return "unknown"
+    return "ok" if configured == jwt_ref else "mismatch"
+
+
+def terraform_public_key_predicates(
+    *,
+    publishable: str,
+    anon: str,
+    service_role: str,
+) -> Dict[str, bool]:
+    """Mirror Terraform hard public-key predicates for offline regression tests."""
+    pub = publishable.strip() if isinstance(publishable, str) else ""
+    legacy = anon.strip() if isinstance(anon, str) else ""
+    service = service_role.strip() if isinstance(service_role, str) else ""
+    pub_ok = pub == "" or classify_supabase_public_key(pub) == "public"
+    legacy_ok = legacy == "" or classify_supabase_public_key(legacy) == "public"
+    present = bool(pub or legacy)
+    not_equal_service = (not pub or pub != service) and (not legacy or legacy != service)
+    coexistence_allowed = True
+    public_keys_safe = bool(present and pub_ok and legacy_ok and not_equal_service)
+    return {
+        "public_keys_safe": public_keys_safe,
+        "coexistence_allowed": coexistence_allowed,
+        "publishable_ok": pub_ok,
+        "anon_ok": legacy_ok,
+        "present": present,
+    }
 
 
 def _safe_error(code: str) -> str:
@@ -824,6 +984,82 @@ def run_preflight(
             )
         )
 
+    # Modern publishable and legacy anon may coexist with different values.
+    # Prefer modern when resolving; validate EACH configured candidate.
+    binding_env: Dict[str, Any] = {}
+    for alias in (
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "SUPABASE_URL",
+        "SUPABASE_PROJECT_ID",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    ):
+        try:
+            resolved_alias = source.resolve(alias)
+        except UnknownAliasError:
+            continue
+        if resolved_alias:
+            binding_env[alias] = resolved_alias
+
+    for key in sorted(PUBLIC_SUPABASE_KEY_NAMES):
+        pub_val = source.resolve(key)
+        if not pub_val:
+            continue
+        kind = classify_supabase_public_key(pub_val)
+        if kind == "privileged":
+            errors.append(_safe_error(ERR_PUBLIC_KEY_PRIVILEGED))
+            capabilities.append(
+                Capability(
+                    name="public.config.supabase_key_type",
+                    status="blocked",
+                    reason=ERR_PUBLIC_KEY_PRIVILEGED,
+                )
+            )
+            break
+        if kind == "malformed":
+            errors.append(_safe_error(ERR_PUBLIC_KEY_MALFORMED))
+            capabilities.append(
+                Capability(
+                    name="public.config.supabase_key_type",
+                    status="blocked",
+                    reason=ERR_PUBLIC_KEY_MALFORMED,
+                )
+            )
+            break
+        if assess_jwt_project_binding(binding_env, pub_val) == "mismatch":
+            errors.append(_safe_error(ERR_PUBLIC_KEY_PROJECT_MISMATCH))
+            capabilities.append(
+                Capability(
+                    name="public.config.supabase_key_project",
+                    status="blocked",
+                    reason=ERR_PUBLIC_KEY_PROJECT_MISMATCH,
+                )
+            )
+            break
+
+    # Server anon alias must remain a public-class key (never service_role material).
+    anon_alias = source.resolve("SUPABASE_ANON_KEY")
+    if anon_alias:
+        anon_kind = classify_supabase_public_key(anon_alias)
+        if anon_kind != "public":
+            errors.append(_safe_error(ERR_ANON_KEY_TYPE))
+            capabilities.append(
+                Capability(
+                    name="supabase.anon_key.type",
+                    status="blocked",
+                    reason=ERR_ANON_KEY_TYPE,
+                )
+            )
+        elif assess_jwt_project_binding(binding_env, anon_alias) == "mismatch":
+            errors.append(_safe_error(ERR_PUBLIC_KEY_PROJECT_MISMATCH))
+            capabilities.append(
+                Capability(
+                    name="public.config.supabase_key_project",
+                    status="blocked",
+                    reason=ERR_PUBLIC_KEY_PROJECT_MISMATCH,
+                )
+            )
+
     identity = _check_vercel_identity(source, errors)
 
     capabilities.append(
@@ -1008,6 +1244,9 @@ def run_preflight(
         in {
             "public.config.allowlist",
             "public.config.secret_exfiltration",
+            "public.config.supabase_key_type",
+            "public.config.supabase_key_project",
+            "supabase.anon_key.type",
             "account.alignment",
             "permissions.claims",
             "vercel.token.read",

@@ -146,9 +146,45 @@ variable "supabase_url" {
 }
 
 variable "supabase_anon_key" {
-  description = "Supabase anonymous key"
+  description = "Legacy Supabase anonymous/public key (compat). Prefer supabase_publishable_key when available. May coexist with a different publishable value for the same project."
   type        = string
   sensitive   = true
+  default     = ""
+
+  validation {
+    condition = (
+      trimspace(var.supabase_anon_key) == "" ||
+      (
+        !startswith(trimspace(var.supabase_anon_key), "sb_secret_") &&
+        (
+          can(regex("^sb_publishable_[A-Za-z0-9_-]{16,}$", trimspace(var.supabase_anon_key))) ||
+          can(regex("^eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$", trimspace(var.supabase_anon_key)))
+        )
+      )
+    )
+    error_message = "supabase_anon_key must be empty, a legacy anon JWT, or sb_publishable_* — never sb_secret_* / privileged material."
+  }
+}
+
+variable "supabase_publishable_key" {
+  description = "Modern Supabase publishable/public key (optional). Preferred over supabase_anon_key when nonempty. May differ from legacy anon for the same project."
+  type        = string
+  sensitive   = true
+  default     = ""
+
+  validation {
+    condition = (
+      trimspace(var.supabase_publishable_key) == "" ||
+      (
+        !startswith(trimspace(var.supabase_publishable_key), "sb_secret_") &&
+        (
+          can(regex("^sb_publishable_[A-Za-z0-9_-]{16,}$", trimspace(var.supabase_publishable_key))) ||
+          can(regex("^eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$", trimspace(var.supabase_publishable_key)))
+        )
+      )
+    )
+    error_message = "supabase_publishable_key must be empty, sb_publishable_*, or a public anon JWT — never sb_secret_* / privileged material."
+  }
 }
 
 variable "supabase_service_role_key" {

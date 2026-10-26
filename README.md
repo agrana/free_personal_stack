@@ -2,6 +2,20 @@
 
 A reusable Next.js application and infrastructure template using Terraform, Vercel, Supabase, and Cloudflare. Local configuration, safety checks, and deployment verification are implemented; the initializer's live provisioning adapter remains gated. See [current capabilities and safety boundaries](docs/bootstrap.md).
 
+## Accounts you need
+
+| Account | Purpose | Reuse for additional apps? |
+| --- | --- | --- |
+| **GitHub** | Generate the repository, store code and run CI | Yes |
+| **Vercel** | Host the app; each app gets its own project | Yes, reuse the account/team |
+| **Supabase** | Database and authentication | Yes, reuse one existing project/database with app-specific isolation |
+| **Cloudflare** | DNS for a custom domain managed by this template | Yes, reuse the existing zone |
+| **Domain registrar** | Own the custom domain | Yes, use another subdomain |
+
+Start with a Vercel-provided hostname if you do not need a custom domain yet; Cloudflare/domain ownership is optional for that first preview. OpenAI and other model-provider accounts are optional app features. No AWS account is needed. Free-plan limits and domain costs still apply.
+
+**Before collecting tokens:** read the [account and permission checklist](02_Create_Accounts.md). Prefer the [Vercel–Supabase existing-project integration](docs/setup/VERCEL_SUPABASE.md) to reduce manual copying; the native Marketplace create-database flow is a different path. This rollout reuses one existing database; a create-new project mode is deferred backlog. Runtime, build boundary and preflight accept modern `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` with legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` blank fallback (values may differ) — see that guide for the key matrix.
+
 ## Start with your coding agent
 
 Create a repository with GitHub's **Use this template**, open its checkout in your coding agent, and paste this prompt. It is tool-neutral: use it with Cursor, Codex, Claude Code, or another agent that can inspect and edit the repository.
@@ -120,33 +134,25 @@ Use the starter prompt above and [AGENTS.md](AGENTS.md) for the current path. Hi
 
 See [Terraform setup](docs/ci-cd/TERRAFORM_SETUP.md) for workflow context.
 
-## 🔐 Required API Tokens
+## 🔐 Credentials by operation
 
-You'll need these tokens (all free tiers available):
+Use native GitHub/Vercel authorization and the existing-project Supabase integration where available. Automation tokens are required only by the operations that use them:
 
-### Cloudflare
-- API Token with:
-  - **Zone:Zone:Read** (required)
-  - **Zone:DNS:Edit** (required)
-  - Scoped to your zone
+- **Cloudflare DNS automation:** Zone Read and DNS Edit, scoped to the specific existing zone.
+- **Vercel management/Terraform:** approved management token/session for the intended account/team.
+- **Supabase runtime:** project URL and publishable/legacy anon configuration; privileged credentials only for explicit server needs.
+- **Database migrations:** a reviewed connection with app-appropriate privileges. A Supabase management token is separate and required only for management operations that need it.
 
-### Vercel
-- API Token from account settings
-
-### Supabase
-- Access Token (personal token)
-- Project URL, API keys, Project ID
-
-See [02_Create_Accounts.md](02_Create_Accounts.md) for detailed instructions.
+See [the account and permission checklist](02_Create_Accounts.md). Reuse approved credential sources; GitHub secret names do not expose stored values.
 
 ## 📝 Workflow
 
-1. **Fork & Clone** → Get the code
-2. **Create Accounts** → Get API tokens
-3. **GitHub Secrets** → Store tokens securely
-4. **Run Terraform** → Create infrastructure
-5. **Verify** → Check dashboard at your domain
-6. **Build** → Start creating your app!
+1. **Use this template** → Generate the app repository.
+2. **Connect accounts** → Reuse existing service connections and the shared database.
+3. **Configure and validate** → Prepare non-secret app identity and verify credentials safely.
+4. **Review the plan** → Confirm ownership, costs and shared-service protection; live apply remains gated.
+5. **Approve supported deployment steps** → Make only reviewed app-scoped changes.
+6. **Verify** → Check the actual URL, revision, access and database isolation before reporting success.
 
 ## 🐛 Troubleshooting
 

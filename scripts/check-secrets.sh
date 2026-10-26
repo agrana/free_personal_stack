@@ -41,7 +41,7 @@ REQUIRED_SECRETS=(
     "VERCEL_ORG_ID:Required for Vercel organization access"
     "VERCEL_PROJECT_ID:Required for Vercel project deployment"
     "NEXT_PUBLIC_SUPABASE_URL:Required for application runtime"
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY:Required for Supabase client"
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:Preferred public Supabase key (or legacy NEXT_PUBLIC_SUPABASE_ANON_KEY)"
     "SUPABASE_SERVICE_ROLE_KEY:Required for admin operations"
     "NEXT_PUBLIC_SITE_URL:Required for production site URL"
 )
