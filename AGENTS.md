@@ -47,6 +47,16 @@ Use `app.config.schema.json`, `examples/app.config.example.json` and the validat
 
 Use explicitly authorized credential sources and the existing preflight interface. Read credential names and presence without printing values. Keep credentials out of prompts, Git, reports, command arguments and browser bundles. GitHub secret-list access exposes names, not saved values. Project-wide Supabase service credentials bypass RLS; they do not prove app isolation. Public configuration must follow the preflight allowlist.
 
+Use `scripts/setup-secret-placeholders.py --repo OWNER/REPO` for an authenticated
+owner's dry-run inventory; after explicit target review and approval, add `--apply`
+to create only missing example aliases. Never infer the target from upstream
+remotes. Authenticate via `gh auth login` with a securely supplied owner PAT
+(repository Secrets read/write); default Actions `GITHUB_TOKEN` cannot manage
+repository secrets. Send the user to repository Settings → Secrets and variables
+→ Actions to edit precreated placeholders. The sentinel
+`SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE` is missing, never readiness. Preserve
+existing entries and avoid concurrent secret writers; see README for commands.
+
 A valid configuration or metadata flag is not evidence of live ownership, permission or deployment authorization. Explain missing permissions with a precise next action; ask the user to authorize through a secure channel rather than paste secrets into chat.
 
 ## Bootstrap and deployment gates

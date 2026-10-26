@@ -40,7 +40,13 @@ sources; never ask me to paste secrets into chat or expose values in logs,
 Git, command arguments or browser code. Reuse suitable authorized service
 connections instead of asking me to copy credentials between dashboards.
 
-Proceed with local setup and verification. At a missing permission or human
+Proceed with local setup and verification. With my approval to create only
+missing secret placeholders in my explicit OWNER/REPO, use the authenticated
+GitHub CLI and scripts/setup-secret-placeholders.py --repo OWNER/REPO first
+(dry-run), verify the target is my app rather than upstream, then add --apply.
+Preserve existing secrets. Direct me to edit the precreated entries in GitHub's
+repository Secrets UI; placeholders are missing credentials, not readiness.
+At a missing permission or human
 authorization step, explain the exact action needed and preserve progress.
 Report unsupported automation honestly: the shipped initializer's live apply
 adapter is gated. Do not bypass safety checks or pretend fixture tests prove
@@ -61,6 +67,49 @@ fixes in the template and application features in the generated repository.
 ```
 
 Agent instructions: [AGENTS.md](AGENTS.md). The prompt starts a guided setup; it does not promise unattended deployment or automatically authorize remote changes.
+
+## Precreate secret entries, then edit them in GitHub
+
+From your generated app checkout, authenticate `gh` as the repository owner
+(or an explicitly authorized administrator). Use `gh auth login` interactively
+with an owner PAT: a fine-grained PAT scoped to this repository with **Secrets:
+read and write** (and repository metadata read), or a classic PAT with `repo`
+scope. Never paste the PAT in chat, a command argument or a tracked file.
+The default Actions `GITHUB_TOKEN` cannot manage repository secrets; adding
+workflow `permissions` does not grant this ability. Environment `GH_TOKEN` /
+`GITHUB_TOKEN` overrides saved CLI login: unset unsuitable tokens before login.
+
+```bash
+gh auth login --hostname github.com
+gh auth status
+# Replace OWNER/REPO with your generated app, not the upstream template.
+python3 scripts/setup-secret-placeholders.py --repo OWNER/REPO
+# Review the verified target and planned names; apply only with approval:
+python3 scripts/setup-secret-placeholders.py --repo OWNER/REPO --apply
+```
+
+The default is dry-run (`--dry-run` is also accepted). The script verifies the
+explicit target through GitHub, lists all repository secret names before writing,
+and creates only missing names from `examples/app.config.example.json`
+`secretAliases`: `CLOUDFLARE_API_TOKEN`, `VERCEL_API_TOKEN`, `SUPABASE_URL`,
+`SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ACCESS_TOKEN`, and
+`TERRAFORM_STATE_PASSWORD`. Existing entries are preserved, including existing
+placeholders. Any owner/repository is permitted when explicitly selected; the
+script never infers a target from this checkout's remotes.
+
+Open `https://github.com/OWNER/REPO/settings/secrets/actions` → **Repository
+secrets** and edit each placeholder with its real value. The sentinel
+`SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE` counts as missing in credential preflight
+and setup validation; names existing in GitHub do **not** establish readiness.
+These are repository secrets, not environment secrets. The historical setup
+workflow has additional requirements beyond these seven bootstrap aliases.
+
+Run without concurrent secret editors: GitHub's secret API is an upsert, not an
+atomic create-only API. The script rechecks names before each write, but cannot
+eliminate a concurrent create race. Remote errors stop the run with a nonzero
+exit; earlier successful placeholders remain and a rerun preserves them. No
+real secret values are read or printed. Secret entry creation neither deploys
+resources nor authorizes binding, infrastructure apply or database migrations.
 
 ## 🚀 Quick Start
 

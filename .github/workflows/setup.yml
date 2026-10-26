@@ -44,6 +44,13 @@ jobs:
           invalid_secrets=()
           warnings=()
           
+          # Normalize every supplied sentinel to missing before format/presence checks.
+          for name in CLOUDFLARE_API_TOKEN VERCEL_API_TOKEN SUPABASE_URL SUPABASE_ANON_KEY SUPABASE_SERVICE_ROLE_KEY SUPABASE_ACCESS_TOKEN SUPABASE_DATABASE_PASSWORD DOMAIN_NAME TERRAFORM_STATE_PASSWORD; do
+            if [[ "${!name}" =~ ^[[:space:]]*SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE[[:space:]]*$ ]]; then
+              printf -v "$name" '%s' ''
+            fi
+          done
+
           # Extract project ID from SUPABASE_URL if provided
           if [ -n "$SUPABASE_URL" ]; then
             # Extract project ID from URL: https://xxxxx.supabase.co -> xxxxx

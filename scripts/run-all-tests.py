@@ -22,6 +22,7 @@ EXPLICIT_SUITES: Tuple[str, ...] = (
     "tests/plan-guard_test.py",
     "tests/infra-safety_test.py",
     "tests/secrets_preflight_test.py",
+    "tests/secret_placeholders_test.py",
     "tests/supabase_public_key_compat_test.py",
     "tests/terraform_vercel_env_foreach_test.py",
     "tests/shared_db_isolation_test.py",
