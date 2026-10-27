@@ -15,6 +15,7 @@ import sys
 
 SENTINEL = "SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE"
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples/app.config.example.json"
+LAUNCH_NAMES = ("VERCEL_API_TOKEN", "VERCEL_TEAM_ID", "SUPABASE_URL", "SUPABASE_ANON_KEY")
 
 
 class SetupError(Exception):
@@ -52,13 +53,17 @@ def existing_names(repo: str) -> set[str]:
         raise SetupError("Invalid secret inventory; no further writes attempted.") from None
 
 
-def onboard(repo: str, apply: bool = False) -> None:
+def onboard(repo: str, apply: bool = False, profile: str = "legacy") -> None:
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+", repo) or repo.split("/")[1] in {".", ".."}:
         raise SetupError("--repo must explicitly name OWNER/REPO (not a URL).")
     aliases = json.loads(EXAMPLE.read_text())["secretAliases"]
     names = sorted(set(aliases.values()))
     if len(names) != 7 or not all(re.fullmatch(r"[A-Z][A-Z0-9_]+", name) for name in names):
         raise SetupError("Expected exactly seven valid example secret aliases.")
+    if profile == "launch":
+        names = sorted(LAUNCH_NAMES)
+    elif profile != "legacy":
+        raise SetupError("Unknown onboarding profile.")
     try:
         identity = json.loads(gh("api", f"repos/{repo}"))["full_name"]
     except (ValueError, KeyError, TypeError):
@@ -87,12 +92,13 @@ def onboard(repo: str, apply: bool = False) -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True, help="Explicit target OWNER/REPO; never inferred from remotes")
+    parser.add_argument("--profile", choices=("launch", "legacy"), default="legacy", help="launch: four shell-launch secrets; legacy: seven advanced aliases")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--apply", action="store_true", help="Create missing entries (remote mutation)")
     mode.add_argument("--dry-run", action="store_true", help="List planned changes only (default)")
     args = parser.parse_args(argv)
     try:
-        onboard(args.repo, args.apply)
+        onboard(args.repo, args.apply, args.profile)
     except (SetupError, OSError, ValueError, KeyError, TypeError):
         print("Secret placeholder setup failed; no further writes attempted. Check gh authentication, target and Secrets permissions. Earlier successful entries, if any, remain; rerun safely after fixing the error.", file=sys.stderr)
         return 1

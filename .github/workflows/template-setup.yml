@@ -1,150 +1,15 @@
-name: Template Repository Setup
+name: Template Repository Setup (legacy guide)
 
 on:
-  push:
-    branches:
-      - main
-      - master
-  repository_dispatch:
-    types: [repository-created]
   workflow_dispatch:
 
 permissions:
-  contents: write
-  issues: write
-  actions: write
+  contents: read
 
 jobs:
-  setup:
-    name: Setup New Repository from Template
+  guide:
     runs-on: ubuntu-latest
-    # Only run on first push (initial commit) or manual trigger
-    # Check if this is the initial commit by checking if before SHA is all zeros
-    if: |
-      github.event_name == 'workflow_dispatch' || 
-      github.event_name == 'repository_dispatch' || 
-      github.event.before == '0000000000000000000000000000000000000000'
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Check if this is initial commit
-        id: check-initial
+      - name: Show current setup path
         run: |
-          COMMIT_COUNT=$(git rev-list --count HEAD 2>/dev/null || echo "1")
-          if [ "$COMMIT_COUNT" -le "1" ]; then
-            echo "is_initial=true" >> $GITHUB_OUTPUT
-            echo "✅ This appears to be the initial commit (commit count: $COMMIT_COUNT)"
-          else
-            echo "is_initial=false" >> $GITHUB_OUTPUT
-            echo "⚠️  Not the initial commit (commit count: $COMMIT_COUNT), skipping setup"
-          fi
-
-      - name: Create Production Environment
-        if: steps.check-initial.outputs.is_initial == 'true'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            try {
-              await github.rest.repos.getEnvironment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                environment_name: 'production'
-              });
-              console.log('✅ Production environment already exists');
-            } catch (error) {
-              if (error.status === 404) {
-                await github.rest.repos.createOrUpdateEnvironment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  environment_name: 'production'
-                });
-                console.log('✅ Created production environment');
-              } else {
-                throw error;
-              }
-            }
-
-      - name: Trigger Setup Workflow
-        if: steps.check-initial.outputs.is_initial == 'true'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'setup.yml',
-              ref: context.ref,
-              inputs: {
-                setup_mode: 'auto-setup'
-              }
-            });
-
-      - name: Create Welcome Issue
-        if: steps.check-initial.outputs.is_initial == 'true'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            // Check if welcome issue already exists to prevent duplicates
-            const { data: existingIssues } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              labels: 'welcome'
-            });
-            
-            const hasWelcomeIssue = existingIssues.some(issue => 
-              issue.title.includes('Welcome') || issue.title.includes('Setup Required')
-            );
-            
-            if (hasWelcomeIssue) {
-              console.log('⚠️  Welcome issue already exists, skipping creation');
-              return;
-            }
-            
-            const issueBody = '# Repository setup instructions\n\n' +
-              'This repository was created from a template. Follow these steps to get started:\n\n' +
-              '## 🔧 Next Steps\n\n' +
-              '1. **Configure GitHub Secrets**\n' +
-              '   - Go to **Settings** → **Environments** → **production** → **Add secret**\n' +
-              '   - Add the following required secrets:\n\n' +
-              '### Required Secrets\n\n' +
-              '**Domain management**\n' +
-              '- `CLOUDFLARE_API_TOKEN` - Your Cloudflare API token (used by Terraform to create DNS records)\n' +
-              '- `DOMAIN_NAME` - Your domain name (used by Terraform to configure DNS and email routing)\n\n' +
-              '**Terraform**\n' +
-              '- `TERRAFORM_STATE_PASSWORD` - Generate with: `openssl rand -base64 32` (used to encrypt Terraform state file)\n\n' +
-              '**Vercel**\n' +
-              '- `VERCEL_API_TOKEN` - Your Vercel API token (used by Terraform to create Vercel project and set environment variables)\n\n' +
-              '**Supabase**\n' +
-              '- `SUPABASE_URL` - Your Supabase project URL (used by Terraform to configure Vercel environment variables and by the app)\n' +
-              '- `SUPABASE_ANON_KEY` - Supabase anonymous key (used by Terraform to set Vercel environment variables; used by the app in client-side code - safe to expose in browser, respects Row Level Security policies)\n' +
-              '- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key (used by Terraform to set Vercel environment variables; used by the app in server-side code only - bypasses RLS, keep secret)\n' +
-              '- `SUPABASE_ACCESS_TOKEN` - Supabase access token (used by GitHub Actions to run database migrations)\n' +
-              '- `SUPABASE_DATABASE_PASSWORD` - Your Supabase database password (used by GitHub Actions to link project and run migrations)\n\n' +
-              '2. **Validate Secrets**\n' +
-              '   - Go to **Actions** → **Repository Setup** → **Run workflow**\n' +
-              '   - Select `validate` mode to check your secrets\n' +
-              '   - The validation will clearly show which secrets are missing\n\n' +
-              '3. **Deploy Infrastructure**\n' +
-              '   - Once secrets are validated, run **Terraform Infrastructure** workflow\n' +
-              '   - Start with `plan` command to preview changes\n\n' +
-              '## 📚 Documentation\n\n' +
-              'For detailed instructions, see [docs/ci-cd/TERRAFORM_SETUP.md](docs/ci-cd/TERRAFORM_SETUP.md)';
-            
-            const { data: issue } = await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: 'Repository setup instructions',
-              body: issueBody,
-              labels: ['welcome']
-            });
-            
-            console.log(`✅ Created welcome issue #${issue.number}`);
-
+          printf '%s\n' '## Launch app' 'Use the README.md four-secret quickstart, then run **Actions → Launch app → Run workflow**.' 'Generated repositories keep their own name and immutable repository ID. No README rewriting or legacy setup dispatch is required.' >> "$GITHUB_STEP_SUMMARY"

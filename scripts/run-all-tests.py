@@ -30,6 +30,10 @@ EXPLICIT_SUITES: Tuple[str, ...] = (
     "tests/deployment_verification_test.py",
     "tests/workflow_safety_test.py",
     "tests/test_runner_test.py",
+    "tests/launch_app_test.py",
+    "tests/supabase_access_check_test.py",
+    "tests/vercel_access_check_test.py",
+    "tests/template_shell_test.py",
 )
 
 
