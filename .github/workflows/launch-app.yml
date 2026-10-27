@@ -1,0 +1,57 @@
+name: Launch app
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Deploy authorizes creation; verify makes no provider writes
+        type: choice
+        options: [deploy, verify]
+        default: deploy
+      expected_project_id:
+        description: Recovery only; reviewed exact unmarked Vercel project ID
+        type: string
+        default: ''
+      confirm_repository_id:
+        description: Recovery only; confirm this repository numeric ID
+        type: string
+        default: ''
+  push:
+    branches: ['**']
+permissions:
+  contents: read
+concurrency:
+  group: launch-app-${{ github.repository_id }}
+  cancel-in-progress: false
+jobs:
+  launch:
+    if: >-
+      github.repository_id != '1051601680' &&
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'push') &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+      # Install without provider credentials in the process environment.
+      - name: Install pinned deployment CLI
+        run: npm install --prefix "$RUNNER_TEMP/launch-vercel" vercel@65.4.0 --ignore-scripts --no-audit --no-fund
+      - name: Launch or verify shell
+        env:
+          VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          OPERATION: ${{ inputs.operation || 'deploy' }}
+          EXPECTED_PROJECT_ID: ${{ inputs.expected_project_id }}
+          CONFIRM_REPOSITORY_ID: ${{ inputs.confirm_repository_id }}
+        run: >-
+          python3 scripts/launch-app.py --source "$GITHUB_WORKSPACE"
+          --vercel-bin "$RUNNER_TEMP/launch-vercel/node_modules/.bin/vercel" --operation "$OPERATION"
+          --expected-project-id "$EXPECTED_PROJECT_ID"
+          --confirm-repository-id "$CONFIRM_REPOSITORY_ID"

@@ -1,12 +1,9 @@
+import type { Metadata } from 'next';
 import './globals.css';
-import { Inter } from 'next/font/google';
-import Navigation from '@/app/components/Navigation';
 
-const inter = Inter({ subsets: ['latin'] });
-
-export const metadata = {
-  title: 'Infrastructure Verification',
-  description: 'Verify that your infrastructure components are properly configured',
+export const metadata: Metadata = {
+  title: 'Application ready',
+  description: 'A minimal application shell, ready for your next product.',
 };
 
 export default function RootLayout({
@@ -16,10 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang='en'>
-      <body className={inter.className}>
-        <Navigation />
-        <main className='min-h-screen bg-gray-50'>{children}</main>
-      </body>
+      <body className='bg-slate-50 font-sans antialiased'>{children}</body>
     </html>
   );
 }

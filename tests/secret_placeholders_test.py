@@ -29,7 +29,7 @@ NAMES = sorted(json.loads(setup.EXAMPLE.read_text())["secretAliases"].values())
 
 
 class PlaceholderTests(unittest.TestCase):
-    def invoke(self, apply=False, existing=(), fail=None, inventory=None, identity="other-owner/generated-app"):
+    def invoke(self, apply=False, existing=(), fail=None, inventory=None, identity="other-owner/generated-app", profile="legacy"):
         calls = []
         def run(args, **kwargs):
             calls.append((args, kwargs))
@@ -45,7 +45,7 @@ class PlaceholderTests(unittest.TestCase):
             return subprocess.CompletedProcess(args, code, output, "DO_NOT_PRINT_REMOTE_CONTENT")
         out, err = io.StringIO(), io.StringIO()
         with patch.object(setup.subprocess, "run", side_effect=run), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = setup.main(["--repo", "other-owner/generated-app"] + (["--apply"] if apply else []))
+            rc = setup.main(["--repo", "other-owner/generated-app", "--profile", profile] + (["--apply"] if apply else []))
         self.assertNotIn("DO_NOT_PRINT_REMOTE_CONTENT", out.getvalue() + err.getvalue())
         return rc, calls, out.getvalue()
 
@@ -54,6 +54,13 @@ class PlaceholderTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(output.count("Would create placeholder:"), 7)
         self.assertFalse(any(c[0][1] == "secret" for c in calls))
+
+    def test_launch_profile_creates_only_four_names_and_preserves_existing(self):
+        rc, calls, output = self.invoke(True, ("SUPABASE_URL",), profile="launch")
+        self.assertEqual(rc, 0)
+        writes = [c[0][3] for c in calls if c[0][1] == "secret"]
+        self.assertEqual(writes, sorted(set(setup.LAUNCH_NAMES) - {"SUPABASE_URL"}))
+        self.assertNotIn("SUPABASE_SERVICE_ROLE_KEY", output)
 
     def test_apply_preserves_existing_and_sends_only_sentinel_via_stdin(self):
         rc, calls, _ = self.invoke(True, NAMES[:2])

@@ -102,6 +102,17 @@ def _node_assert_safe_public_env(env: Mapping[str, str]) -> subprocess.Completed
 
 
 class WorkflowSafetyTests(unittest.TestCase):
+    def test_first_party_runtime_actions_use_reviewed_node24_releases(self) -> None:
+        expected = {
+            'actions/checkout': 'v7.0.1',
+            'actions/setup-node': 'v7.1.0',
+            'actions/setup-python': 'v7.1.0',
+        }
+        for path in (REPO_ROOT / '.github/workflows').glob('*.yml'):
+            for action, ref in re.findall(r'uses:\s*(actions/[a-z-]+)@([^\s#]+)', path.read_text()):
+                if action in expected:
+                    self.assertEqual(ref, expected[action], f'{path.name}: {action}')
+
     def test_legacy_deploy_and_terraform_remain_disabled(self) -> None:
         deploy = _read(".github/workflows/deploy.yml")
         terraform = _read(".github/workflows/terraform.yml")
@@ -130,7 +141,7 @@ class WorkflowSafetyTests(unittest.TestCase):
         # Default actions/checkout shallow depth omits it; require full history.
         self.assertRegex(
             wf,
-            r"(?s)uses:\s*actions/checkout@v4\s*\n\s*with:\s*\n(?:\s*#[^\n]*\n)*\s*fetch-depth:\s*0\b",
+            r"(?s)uses:\s*actions/checkout@v7\.0\.1\s*\n\s*with:\s*\n(?:\s*#[^\n]*\n)*\s*fetch-depth:\s*0\b",
             msg="app-quality checkout must set fetch-depth: 0 for pinned template history",
         )
         # Generated repos lack upstream ancestry; CI must materialize the exact

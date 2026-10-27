@@ -16,16 +16,8 @@ on:
         options:
           - plan
         default: plan
-  push:
-    branches:
-      - main
-    paths:
-      - 'terraform/**'
-      - '.github/workflows/terraform.yml'
-  pull_request:
-    paths:
-      - 'terraform/**'
-      - '.github/workflows/terraform.yml'
+  # Infrastructure planning is an explicitly requested advanced workflow.
+  # The four-secret shell path needs neither Terraform nor privileged DB keys.
 
 env:
   TF_VERSION: '1.9.0'
@@ -99,7 +91,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 

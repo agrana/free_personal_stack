@@ -2,75 +2,72 @@
 
 ## Start here
 
-This repository is a Next.js/TypeScript application and reusable infrastructure template. Read `package.json`, `docs/bootstrap.md`, relevant workflow files, and this guide before editing. Inspect `git status --short --branch` and preserve existing work. Check for more specific instructions in the directories you change.
+Read `package.json`, `README.md`, `docs/secrets-only-launch.md` and relevant workflows before editing. Inspect `git status --short --branch`, preserve existing work and check directory-specific instructions. This is a Next.js/TypeScript application and reusable infrastructure template.
 
-Use GitHub's **Use this template** flow to create a new application repository. Confirm whether this checkout is the upstream template or a generated application. Reusable fixes belong upstream; product features and deployment configuration belong in the generated application. Existing generated repositories require an explicit update; template changes do not propagate automatically.
+Use GitHub **Use this template** to generate an independent app repository, not a fork. Determine whether this checkout is upstream or a generated app. Reusable fixes belong upstream; product features belong in the generated app. Template updates do not propagate automatically.
 
-## Architecture and ownership
+## Primary onboarding: secrets-only shell
 
-- Cloudflare owns DNS; Vercel hosts the application.
-- Reuse one existing Supabase database with app-specific namespaces, migration ownership and access policies.
-- Each application has a distinct Vercel project, hostname and infrastructure state key.
-- Preserve other applications, shared database lifecycle, DNS zones and email settings. Provisioning and migration changes require explicit review.
-- Legacy documentation includes earlier automation behavior. Verify it against current code and `docs/bootstrap.md` before executing it.
+The supported initial path is **generate repository → fill four repository Actions secrets → Run workflow: Launch app (`deploy`)** on the default branch. It requires only `VERCEL_API_TOKEN`, `VERCEL_TEAM_ID`, `SUPABASE_URL` and `SUPABASE_ANON_KEY` (modern publishable key accepted). No local `.env`, initial app-config edit, Cloudflare, service-role or Terraform credentials are needed. See `docs/secrets-only-launch.md` for permissions and recovery. Secret edits do not trigger Actions.
 
-## Local setup and verification
+The separate CLI launcher derives project slug and immutable repository ID/SHA from authenticated GitHub metadata. Manual first deploy authorizes project creation; later default-branch pushes only update a previously owned project. Upstream numeric repository ID is blocked. A production Config marker binds project ownership. Missing markers after interruption require manually reviewed `expected_project_id` and `confirm_repository_id`; conflicting markers can never be overridden. Never infer ownership from project name alone.
 
-Use Node.js 24.x as declared in `package.json`. Review dependency scripts before installation. Bootstrap Python dependencies in an isolated environment:
+Keep root layout and landing page database-free and free of inherited `Navigation` or demo verification UI. Reusable `/auth/signin` and `/auth/signout` code remains reachable without root links: configure and review auth separately. `/api/health` reports process liveness and exact deployed SHA, not database access or authentication readiness. Distinguish protected deployments from public verification success.
+
+## Data and resource ownership
+
+- Vercel hosts a distinct project for each application. Select the explicit intended team ID.
+- Users may choose an existing Supabase project or create one externally before launch. Prefer a dedicated project/database for isolation; shared-project reuse is an explicit user choice with shared-resource risk. The launcher creates no database, schema, migrations or demo data.
+- Before enabling data features, require reviewed app-scoped schema/migration ownership, least privilege, RLS and cross-user/cross-app isolation tests. Shell deployment does not verify RLS. Service-role credentials bypass RLS and cannot prove isolation.
+- Optional advanced Cloudflare DNS and Terraform state remain separately scoped. Preserve other apps, database lifecycle, DNS zones and email settings. Provisioning/migrations require explicit review and backup/recovery planning.
+
+## Local developer verification
+
+Node.js 24.x is declared in `package.json`. Review dependency scripts before installation. These developer commands are not initial launch prerequisites:
 
 ```bash
 npm ci
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-bootstrap.txt
-./scripts/validate-app-config.sh --config examples/app.config.example.json --mode draft
 npm run lint
 npm run type-check
 .venv/bin/python scripts/run-all-tests.py
 npm run build
 ```
 
-The test runner explicitly includes hyphenated and underscored test filenames. Database integration needs Podman and a disposable PostgreSQL container; inspect `tests/shared_db_isolation_test.py` before running. Use `APP003_PG_TESTS=1` to require integration rather than silently accepting a skip. Report skips and missing prerequisites separately from passing tests. Builds may require approved public Supabase configuration; clearly label synthetic build values and keep real production secrets out of local tests.
-
-For infrastructure edits, review provider access and downloaded dependencies before initialization:
+The runner explicitly includes hyphenated and underscored test filenames. Focused shell/workflow checks:
 
 ```bash
+.venv/bin/python -m unittest tests.template_shell_test tests.workflow_safety_test -v
+```
+
+Database integration requires Podman and disposable PostgreSQL; inspect `tests/shared_db_isolation_test.py`. Use `APP003_PG_TESTS=1` to require integration instead of accepting a skip. Report skips and missing prerequisites separately. Builds may require approved public Supabase configuration for retained auth routes: label synthetic local test values and keep production credentials out of local tests. The shell itself does not consume database configuration. Health tests use the explicit server-only `APP006_LOCAL_TEST_REVISION` fixture; never fake production verification.
+
+For advanced infrastructure edits:
+
+```bash
+./scripts/validate-app-config.sh --config examples/app.config.example.json --mode draft
 terraform -chdir=terraform fmt -check -recursive
 terraform -chdir=terraform init -backend=false
 terraform -chdir=terraform validate
 ```
 
-Initialization downloads providers. These checks establish local syntax/configuration validity, not remote permissions or a successful deployment.
+Provider initialization downloads dependencies. These checks prove local validity, not live permissions or deployment.
 
-## Configuration and credentials
+## Credentials and optional placeholder setup
 
-Use `app.config.schema.json`, `examples/app.config.example.json` and the validation commands in `docs/bootstrap.md`. Ask only for missing app identity, hostname or service access. Keep non-secret configuration separate from credential values.
+Keep non-secret configuration separate from credentials. Read names/presence without printing values. Keep secrets out of Git, prompts, reports, command arguments and browser bundles. Public Supabase configuration must pass the existing public-key allowlist. GitHub secret-list access exposes names, not values; placeholders do not establish readiness.
 
-Use explicitly authorized credential sources and the existing preflight interface. Read credential names and presence without printing values. Keep credentials out of prompts, Git, reports, command arguments and browser bundles. GitHub secret-list access exposes names, not saved values. Project-wide Supabase service credentials bypass RLS; they do not prove app isolation. Public configuration must follow the preflight allowlist.
+The UI path needs no local helper. Agents can precreate the four launch names with `scripts/setup-secret-placeholders.py --repo '<username>/<repository>' --profile launch` (dry-run), adding `--apply` after target review and approval. The legacy default creates seven advanced bootstrap aliases. Always specify the generated `--repo OWNER/REPO`, review dry-run output and obtain approval before `--apply`. Never infer the target from upstream remotes. Authenticate via secure `gh auth login` as an authorized administrator (fine-grained repository Secrets read/write plus metadata read, or classic `repo`). The default Actions token cannot manage secrets. Existing entries must be preserved; avoid concurrent secret writers because GitHub's upsert API is not atomic create-only. `SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE` means missing. Direct users to repository Settings → Secrets and variables → Actions to replace it. Never ask users to paste credentials in chat.
 
-Use `scripts/setup-secret-placeholders.py --repo OWNER/REPO` for an authenticated
-owner's dry-run inventory; after explicit target review and approval, add `--apply`
-to create only missing example aliases. Never infer the target from upstream
-remotes. Authenticate via `gh auth login` with a securely supplied owner PAT
-(repository Secrets read/write); default Actions `GITHUB_TOKEN` cannot manage
-repository secrets. Send the user to repository Settings → Secrets and variables
-→ Actions to edit precreated placeholders. The sentinel
-`SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE` is missing, never readiness. Preserve
-existing entries and avoid concurrent secret writers; see README for commands.
+## Advanced initializer and safety gates
 
-A valid configuration or metadata flag is not evidence of live ownership, permission or deployment authorization. Explain missing permissions with a precise next action; ask the user to authorize through a secure channel rather than paste secrets into chat.
+The generic launcher is separate from `scripts/app-new.sh` (`plan`, `apply`, `resume`). Read `--help` and `docs/bootstrap.md` before using the initializer. Planning writes local files/state; use explicit directories and preserve edits. It verifies pinned Git objects: generated repositories or shallow clones may lack template history. Materialize the exact pin using `bootstrap.provenance.ensure_pinned_commit_object` from the allowlisted reviewed upstream (`DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL` / reviewed `template` remote); never disable provenance checks or fetch an untrusted source.
 
-## Bootstrap and deployment gates
+The initializer's shipped live adapter remains blocked with `apply.live_integration_missing`; fixture adapters test orchestration only. Do not bypass disabled apply/destroy/reset commands or enable unattended shared-database migrations. A supported shell launcher does not clear those gates.
 
-`scripts/app-new.sh` provides `plan`, `apply` and `resume`; consult `--help` and `docs/bootstrap.md` for current flags. Planning generates local files and durable state, so use explicit output/state directories and preserve user edits. The initializer verifies pinned Git objects: shallow clones or generated repositories may lack required template history. Report that prerequisite and materialize the exact `PINNED_TEMPLATE_REVISION` via `bootstrap.provenance.ensure_pinned_commit_object` from the allowlisted reviewed upstream (`DEFAULT_REVIEWED_TEMPLATE_SOURCE_URL` / configured allowlisted `template` remote); do not disable provenance checks or fetch an untrusted source. See `docs/bootstrap.md` (Reviewed template source).
-
-The shipped live-apply adapter remains blocked with `apply.live_integration_missing`. Fixture adapters exercise orchestration only. Implementing or validating a live adapter is a separate reviewed task. Do not bypass disabled apply/destroy/reset commands or re-enable unattended shared-database migrations.
-
-Before any real mutation, verify account identity, app-scoped ownership, conflict inventory, credential permissions and shared-database preservation. Obtain explicit approval bound to the exact reviewed plan, content digest and intended changes. Revalidate on resume; preserve checkpoint bindings and reject modified generated files. Database provisioning additionally requires a reviewed compatibility/backup/recovery plan.
-
-Use `scripts/verify-deployment.sh --help` for supported verification options. Verify the actual deployed revision and URL, health response, access controls and browser-secret exclusion. Distinguish fixture tests, local production-build tests and remote deployment evidence. Existing workflow checks or preview builds alone do not prove production readiness.
+Before any advanced mutation, verify account identity, scoped ownership, conflict inventory, permissions and shared-resource preservation. Obtain approval bound to the exact reviewed plan/content digest and intended changes. Revalidate on resume and reject modified generated files. Use `scripts/verify-deployment.sh --help` for supported advanced verification. Check actual revision, URL, access controls and browser-secret exclusion; separate fixture, local-build and remote evidence.
 
 ## Change delivery
 
-Keep changes scoped, add regression tests for changed behavior, and run focused checks plus relevant full suites. Treat agent success messages as claims until independently verified. Report exact commands, results, skips, changed files and blockers.
-
-Keep commit/push, PR creation, merge, secret binding and live provisioning as separate approval boundaries. Follow the user's authorized delivery scope. Report security findings and failed checks explicitly before recommending merge. Finish with verified artifacts and precise next actions; preserve incomplete work and explain genuine blockers.
+Keep changes scoped and add regression tests. Run focused checks and relevant suites; verify claims independently. Report exact commands, results, skips, changed files and blockers. Publishing, modifying secrets, provisioning, applying migrations and cleanup are separate approval boundaries. No tool success or green setup-only run proves launch readiness. Preserve incomplete work and explain genuine blockers.
