@@ -19,7 +19,7 @@ A reusable Next.js template with a **secrets-only launch** to Vercel. Start with
 
 **No local `.env`, clone, app-config edit, Cloudflare account, service-role key or Terraform credentials are needed for this launch.** Secret edits alone do not trigger Actions. Once an owned project exists, later default-branch pushes may deploy it; pushes never create a project or adopt an unmarked one. The upstream template is blocked from self-deploying by numeric repository ID.
 
-See **[Secrets-only launch guide](docs/secrets-only-launch.md)** for account permissions, finding your team ID, database choices, interrupted-run recovery and verification limits.
+See **[Secrets-only launch guide](docs/secrets-only-launch.md)** for account permissions, finding your team ID, database choices, interrupted-run recovery and verification limits. Maintainer local stub rehearsal (not live): **[New app runbook](docs/new-app-runbook.md)**.
 
 ## What the initial deployment includes
 
