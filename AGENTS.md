@@ -6,9 +6,17 @@ Read `package.json`, `README.md`, `docs/secrets-only-launch.md` and relevant wor
 
 Use GitHub **Use this template** to generate an independent app repository, not a fork. Determine whether this checkout is upstream or a generated app. Reusable fixes belong upstream; product features belong in the generated app. Template updates do not propagate automatically.
 
-## Primary onboarding: secrets-only shell
+## Primary onboarding: GitHub-only deployment
 
-The supported initial path is **generate repository → fill four repository Actions secrets → Run workflow: Launch app (`deploy`)** on the default branch. It requires only `VERCEL_API_TOKEN`, `VERCEL_TEAM_ID`, `SUPABASE_URL` and `SUPABASE_ANON_KEY` (modern publishable key accepted). No local `.env`, initial app-config edit, Cloudflare, service-role or Terraform credentials are needed. See `docs/secrets-only-launch.md` for permissions and recovery. Secret edits do not trigger Actions.
+The supported setup path is **generate repository → configure repository Actions secrets and variables for the requested operation → manually run its workflow** on the default branch. GitHub stores deployment configuration and credentials; Actions executes provider operations.
+
+| Operation | Required configuration | Workflow |
+| --- | --- | --- |
+| Launch the database-free shell at a Vercel URL | Repository secrets `VERCEL_API_TOKEN`, `VERCEL_TEAM_ID`, `SUPABASE_URL` and `SUPABASE_ANON_KEY` (modern publishable key accepted) | **Launch app** (`deploy`) |
+| Add a Cloudflare-managed custom domain | Reuse the Vercel secrets; add repository secret `CLOUDFLARE_API_TOKEN` and variables `APP_HOSTNAME`, `CLOUDFLARE_ZONE_NAME`. The token needs Zone Read and DNS Edit for the intended zone; an account-owned or user-owned API token with those permissions is supported. | **Custom domain** (`plan`, approved `apply`, `verify`) |
+| Advanced Terraform or database operations | Use the credentials specified by that reviewed workflow and obtain its operation-specific approval. Database access additionally requires reviewed app-scoped grants and RLS. | Consult the advanced workflow and its safety gates |
+
+Initial setup uses GitHub configuration rather than a local `.env` or app-source edits. Keep service-role access restricted to separately reviewed privileged operations. After editing secrets, manually dispatch the relevant workflow to validate and apply the updated configuration. See `docs/secrets-only-launch.md` and `docs/custom-domain.md` for permissions, ownership recovery and verification.
 
 The separate CLI launcher derives project slug and immutable repository ID/SHA from authenticated GitHub metadata. Manual first deploy authorizes project creation; later default-branch pushes only update a previously owned project. Upstream numeric repository ID is blocked. A production Config marker binds project ownership. Missing markers after interruption require manually reviewed `expected_project_id` and `confirm_repository_id`; conflicting markers can never be overridden. Never infer ownership from project name alone.
 
