@@ -35,6 +35,7 @@ EXPLICIT_SUITES: Tuple[str, ...] = (
     "tests/supabase_access_check_test.py",
     "tests/vercel_access_check_test.py",
     "tests/template_shell_test.py",
+    "tests/custom_domain_test.py",
 )
 
 

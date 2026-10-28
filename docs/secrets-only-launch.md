@@ -12,7 +12,7 @@ Generate an independent repository rather than a fork. Choose a lowercase reposi
 - **Vercel:** a team in which your access token can discover the team/projects, create the app project, manage its production configuration and deploy. Find the public **Team ID** in the intended team's **Settings → General** (not the team slug, display name or a personal account ID). Store the full `team_…` value as `VERCEL_TEAM_ID`. Create an access token in Vercel account settings, scoped/authorized for that same team; organization SSO or role restrictions may require an administrator. Every provider operation is explicitly scoped to the selected team; the launcher does not choose a team from an ambiguous inventory.
 - **Supabase:** access to an existing project's URL and public key. You may use a project you already own or create one yourself in the provider dashboard before launch. A dedicated project/database is preferred for isolation. Reusing a shared project is supported as an explicit user choice with shared-resource risk. No database provider creation is automated.
 
-Cloudflare, a registrar, a custom domain, service-role credentials, a Supabase management token and Terraform state credentials are unnecessary for the initial Vercel-hosted shell. Provider limits and charges remain your responsibility.
+Cloudflare, a registrar, a custom domain, service-role credentials, a Supabase management token and Terraform state credentials are unnecessary for the initial Vercel-hosted shell. Provider limits and charges remain your responsibility. After the shell is owned and production-ready, an optional GitHub-only [custom domain](custom-domain.md) path can attach one subdomain via repository variables `APP_HOSTNAME` / `CLOUDFLARE_ZONE_NAME` and a zone-scoped Cloudflare token—still without local `.env` or app-source hostname embeds.
 
 ## Add the four secrets
 
@@ -78,6 +78,10 @@ Do not delete or edit ownership markers to force adoption. Repository renames ca
 The root and health route do not query or mutate application tables. Reusable `/auth/signin` and `/auth/signout` endpoints and auth components remain in the repository, without root navigation links. They are reachable directly, not disabled. Review whether you want them exposed; configure Supabase auth URL/redirect allowlists, providers and session behavior before using them. A deployed shell is not evidence that sign-in works.
 
 **Post-deployment data gate:** review app-scoped schema/table naming, migration ownership, least privilege, backup/recovery, RLS policies and cross-user/cross-app isolation tests before adding data-backed routes or UI. RLS remains **unverified** by this launch, particularly when reusing a shared database. Never treat a project-wide service-role key as proof of isolation. No migrations, schema creation, demo data operations or shared-database resets run through this launcher.
+
+## Optional custom domain
+
+After launch succeeds with a repository marker, see [custom-domain.md](custom-domain.md) for the manual **Custom domain** workflow (`plan` / `apply` / `verify`). It does not replace Launch app recovery for unmarked projects and never deploys source or changes Auth/database/zone settings.
 
 ## Advanced paths remain separate
 

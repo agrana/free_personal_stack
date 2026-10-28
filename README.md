@@ -19,14 +19,14 @@ A reusable Next.js template with a **secrets-only launch** to Vercel. Start with
 
 **No local `.env`, clone, app-config edit, Cloudflare account, service-role key or Terraform credentials are needed for this launch.** Secret edits alone do not trigger Actions. Once an owned project exists, later default-branch pushes may deploy it; pushes never create a project or adopt an unmarked one. The upstream template is blocked from self-deploying by numeric repository ID.
 
-See **[Secrets-only launch guide](docs/secrets-only-launch.md)** for account permissions, finding your team ID, database choices, interrupted-run recovery and verification limits. Maintainer local stub rehearsal (not live): **[New app runbook](docs/new-app-runbook.md)**.
+See **[Secrets-only launch guide](docs/secrets-only-launch.md)** for account permissions, finding your team ID, database choices, interrupted-run recovery and verification limits. Optional subdomain after launch: **[Custom domain](docs/custom-domain.md)** (GitHub variables + manual workflow only). Maintainer local stub rehearsal (not live): **[New app runbook](docs/new-app-runbook.md)**.
 
 ## What the initial deployment includes
 
 - A server-rendered **Application ready** page with no application database reads or writes, demo data or inherited navigation.
 - `/api/health` reporting process liveness and the exact deployed source revision; it does not certify database access, authentication or RLS.
 - Reusable auth code retained at `/auth/signin` and `/auth/signout`, without links from the landing shell. Authentication settings and database isolation still need review before product use.
-- An explicitly scoped, repository-owned Vercel project. No domain, database, schema, DNS or email provisioning.
+- An explicitly scoped, repository-owned Vercel project. No domain, database, schema, DNS or email provisioning in the initial launch (optional custom domain is a separate manual workflow).
 
 Use an existing Supabase project, or create a dedicated project in Supabase before launch. A dedicated database is preferred for isolation. Reusing a shared project is your choice and carries shared-resource risk; configure app-scoped schema and RLS and verify cross-app isolation **before adding data features**. The launcher does not create provider databases or apply migrations. Free-plan limits and provider charges still apply.
 
