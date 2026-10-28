@@ -1146,6 +1146,26 @@ class CustomDomainTests(unittest.TestCase):
                     self.assertNotIn(obsolete, text)
         self.assertIn('## Required hostname and DNS', (ROOT / 'AGENTS.md').read_text())
 
+    def test_operator_contract_requires_github_database_and_migrations(self):
+        for name in ('AGENTS.md', 'README.md', 'docs/secrets-only-launch.md',
+                     'docs/custom-domain.md', 'docs/new-app-runbook.md'):
+            with self.subTest(document=name):
+                text = (ROOT / name).read_text().lower()
+                for requirement in ('database', 'migration', 'rls', 'end-to-end-onboarding.md'):
+                    self.assertIn(requirement, text)
+        agents = (ROOT / 'AGENTS.md').read_text()
+        self.assertIn('## Verification through GitHub Actions', agents)
+        self.assertIn('Before provisioning an application project', agents)
+        self.assertNotIn('Database integration requires Podman', agents)
+        self.assertNotIn('npm ci', agents)
+        self.assertIn('implementation gap', agents)
+        self.assertTrue((ROOT / 'docs/maintainer-verification.md').is_file())
+        status = (ROOT / 'docs/end-to-end-onboarding.md').read_text()
+        self.assertIn('current migration workflow', agents)
+        self.assertIn('explicitly disables live migrations', status)
+        quality = (ROOT / '.github/workflows/app-quality.yml').read_text()
+        self.assertIn('sudo apt-get install -y podman', quality)
+
     def test_docs_linked_from_launch_and_agents(self):
         self.assertIn('custom-domain.md', (ROOT / 'docs/secrets-only-launch.md').read_text())
         self.assertIn('custom-domain.md', (ROOT / 'AGENTS.md').read_text())

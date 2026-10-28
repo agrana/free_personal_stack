@@ -2,6 +2,8 @@
 
 Configure the intended application subdomain after **Launch app** has deployed the shell to its repository-owned Vercel project. DNS is a required onboarding stage. Onboarding is complete only after authoritative/public DNS, HTTPS, the application page and exact production health revision pass at this hostname. The Vercel URL verifies an intermediate shell deployment.
 
+Choose this hostname before project provisioning. DNS verification is one part of the [end-to-end onboarding contract](end-to-end-onboarding.md), which also requires live database connection, applied schema migrations, grants and RLS isolation checks through GitHub Actions. Completing this workflow alone establishes the hostname stage.
+
 Operators configure GitHub repository **variables** and **secrets**, then run the manual **Custom domain** workflow. GitHub configuration and Actions provide the standard setup path; deployment-specific hostnames and provider identifiers stay outside template source.
 
 ## Prerequisites

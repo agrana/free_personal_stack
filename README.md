@@ -1,8 +1,10 @@
 # Free Personal Stack
 
-A reusable Next.js template with GitHub-only onboarding: deploy a database-free shell to Vercel, configure its intended hostname through Cloudflare, and verify the application there.
+A reusable Next.js template whose required GitHub-only onboarding includes an intended hostname, a Supabase connection, app-scoped schema migrations, deployment, DNS and end-to-end verification. The [onboarding contract and implementation status](docs/end-to-end-onboarding.md) distinguish required outcomes from the currently shipped partial workflows.
 
 ## Quickstart: template → credentials → deploy → DNS → verify
+
+Configure the intended hostname, authoritative zone and database target before provisioning an application project. Required live schema migration and application-to-database verification orchestration remain implementation gaps. The shell and DNS workflows below cover intermediate stages; complete onboarding additionally requires applied migrations, runtime database access, grants and RLS isolation checks through Actions.
 
 1. Select **Use this template → Create a new repository** in GitHub. Use a lowercase name such as `my-application` (letters, digits and single hyphens; start with a letter). Create an independent repository, not a fork; leave **Template repository** disabled on your new app.
 2. In the generated repository, open **Settings → Secrets and variables → Actions → Repository secrets** and add these four entries:
@@ -19,7 +21,7 @@ A reusable Next.js template with GitHub-only onboarding: deploy a database-free 
 
 **This quickstart deploys the shell at a Vercel URL using GitHub configuration and Actions.** A Cloudflare-managed custom domain additionally requires `CLOUDFLARE_API_TOKEN` and repository variables `APP_HOSTNAME` and `CLOUDFLARE_ZONE_NAME`; follow the [custom-domain guide](docs/custom-domain.md). After editing secrets, manually run the relevant workflow. Once an owned project exists, later default-branch pushes may deploy it; pushes never create a project or adopt an unmarked one. The upstream template is blocked from self-deploying by numeric repository ID.
 
-5. Complete the required hostname stage: configure `CLOUDFLARE_API_TOKEN`, `APP_HOSTNAME` and `CLOUDFLARE_ZONE_NAME`, then run **Custom domain** (`plan`, approved `apply`, `verify`). Follow the [custom-domain guide](docs/custom-domain.md). Onboarding is complete only after DNS, HTTPS, the page and exact deployed-revision checks pass at the intended hostname. The Vercel URL is an intermediate deployment result.
+5. Complete the required hostname stage: configure `CLOUDFLARE_API_TOKEN`, `APP_HOSTNAME` and `CLOUDFLARE_ZONE_NAME`, then run **Custom domain** (`plan`, approved `apply`, `verify`). Follow the [custom-domain guide](docs/custom-domain.md). Onboarding is complete only after DNS, HTTPS, the page and exact deployed-revision checks pass at the intended hostname, runtime database access works, schema migrations are applied, and grants and RLS isolation are verified. The Vercel URL is an intermediate deployment result.
 
 See **[Secrets-only launch guide](docs/secrets-only-launch.md)** for shell-stage permissions, team ID, database choices and recovery. Required hostname setup: **[Custom domain](docs/custom-domain.md)**. Maintainer local stub rehearsal (not live): **[New app runbook](docs/new-app-runbook.md)**.
 

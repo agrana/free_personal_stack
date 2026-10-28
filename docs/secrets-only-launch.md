@@ -2,7 +2,7 @@
 
 ## The short path
 
-This guide covers the shell-deployment stage of application onboarding. Continue with the required [hostname and DNS stage](custom-domain.md). Onboarding is complete only after DNS, HTTPS, the page and exact deployed-revision checks pass at the intended hostname; a working Vercel URL is an intermediate result.
+This guide covers the shell-deployment stage of application onboarding. Configure the intended hostname and database target before project provisioning. Follow the [full onboarding contract](end-to-end-onboarding.md), including required database connection, schema migrations and [hostname/DNS setup](custom-domain.md). Onboarding is complete only after DNS, HTTPS, the page and exact deployed-revision checks pass at the intended hostname, runtime database access works, migrations are applied, and grants and RLS isolation are verified. The current live migration orchestration remains an implementation gap; a working Vercel URL is an intermediate result.
 
 **Use this template → create a repository → fill four repository Actions secrets → Actions → Launch app → Run workflow (`deploy`).** No local `.env`, initial app-config edit or local tool installation is needed. Use the default branch, normally `main`, and leave recovery inputs empty for the first run. Editing secrets does not start a workflow; explicitly run it after setup.
 
