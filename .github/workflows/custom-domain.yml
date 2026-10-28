@@ -1,0 +1,60 @@
+name: Custom domain
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: plan is read-only; apply needs approved digest; verify checks DNS/TLS/HTTP
+        type: choice
+        options: [plan, apply, verify]
+        default: plan
+      approved_plan_digest:
+        description: Required for apply; exact digest from a reviewed plan or staged TXT plan
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: app-provider-${{ github.repository_id }}
+  cancel-in-progress: false
+jobs:
+  custom-domain:
+    if: >-
+      github.repository_id != '1051601680' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+      - name: Install pinned deployment CLI
+        run: npm install --prefix "$RUNNER_TEMP/launch-vercel" vercel@65.4.0 --ignore-scripts --no-audit --no-fund
+      - name: Plan, apply, or verify custom domain
+        env:
+          VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          APP_HOSTNAME: ${{ vars.APP_HOSTNAME }}
+          CLOUDFLARE_ZONE_NAME: ${{ vars.CLOUDFLARE_ZONE_NAME }}
+          GITHUB_TOKEN: ${{ github.token }}
+          OPERATION: ${{ inputs.operation }}
+          APPROVED_PLAN_DIGEST: ${{ inputs.approved_plan_digest }}
+          ARTIFACT_DIR: ${{ runner.temp }}/custom-domain-artifacts
+        run: >-
+          mkdir -p "$ARTIFACT_DIR"
+          && python3 scripts/custom-domain.py --source "$GITHUB_WORKSPACE"
+          --vercel-bin "$RUNNER_TEMP/launch-vercel/node_modules/.bin/vercel"
+          --operation "$OPERATION"
+          --approved-plan-digest "$APPROVED_PLAN_DIGEST"
+          --artifact-dir "$ARTIFACT_DIR"
+      - name: Upload custom-domain artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-domain-${{ inputs.operation }}
+          path: ${{ runner.temp }}/custom-domain-artifacts
+          if-no-files-found: ignore

@@ -38,6 +38,7 @@ CI/CD automation and GitHub Actions documentation:
 General documentation:
 - `new-app-runbook.md` - Human secrets-only launch plus maintainer local APP-008 rehearsal checklist
 - `secrets-only-launch.md` - Four-secret Launch app path
+- `custom-domain.md` - Optional post-launch subdomain attach (GitHub-only plan/apply/verify)
 - `BLOG_POST_SHORT.md` - Blog post content
 - `SOCIAL_MEDIA_POSTS.md` - Social media content
 

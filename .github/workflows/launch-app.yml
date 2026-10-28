@@ -20,7 +20,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: launch-app-${{ github.repository_id }}
+  # Shared with Custom domain so ownership mutations serialize per app repository.
+  group: app-provider-${{ github.repository_id }}
   cancel-in-progress: false
 jobs:
   launch:

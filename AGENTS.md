@@ -20,6 +20,7 @@ Keep root layout and landing page database-free and free of inherited `Navigatio
 - Users may choose an existing Supabase project or create one externally before launch. Prefer a dedicated project/database for isolation; shared-project reuse is an explicit user choice with shared-resource risk. The launcher creates no database, schema, migrations or demo data.
 - Before enabling data features, require reviewed app-scoped schema/migration ownership, least privilege, RLS and cross-user/cross-app isolation tests. Shell deployment does not verify RLS. Service-role credentials bypass RLS and cannot prove isolation.
 - Optional advanced Cloudflare DNS and Terraform state remain separately scoped. Preserve other apps, database lifecycle, DNS zones and email settings. Provisioning/migrations require explicit review and backup/recovery planning.
+- Optional post-launch custom domain: GitHub variables `APP_HOSTNAME` and `CLOUDFLARE_ZONE_NAME`, secrets `VERCEL_API_TOKEN` / `VERCEL_TEAM_ID` / `CLOUDFLARE_API_TOKEN`, manual workflow **Custom domain** (`plan` / `apply` / `verify`). See `docs/custom-domain.md`. No local `.env`, no hardcoded host/project/zone IDs in template source, no deploy or Auth/database/zone-setting mutations.
 
 ## Local developer verification
 
