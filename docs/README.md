@@ -34,10 +34,15 @@ CI/CD automation and GitHub Actions documentation:
 - `GITHUB_ACTIONS_TERRAFORM.md` - GitHub Actions Terraform guide
 - `MERGE_CHECKLIST.md` - Merge checklist for pull requests
 
+### `/docs/decisions/`
+Accepted planning decisions:
+- `shared-supabase.md` - APP-009 accepted shared Supabase choice, coupled risks, cost/telemetry boundaries
+
 ### `/docs/`
 General documentation:
 - `new-app-runbook.md` - Human secrets-only launch plus maintainer local APP-008 rehearsal checklist
 - `secrets-only-launch.md` - Four-secret Launch app path
+- `supabase-upgrade-isolation.md` - Future upgrade/isolation checklist (no execution claimed)
 - `BLOG_POST_SHORT.md` - Blog post content
 - `SOCIAL_MEDIA_POSTS.md` - Social media content
 
