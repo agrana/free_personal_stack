@@ -1,6 +1,8 @@
-# Custom domain (optional)
+# Required application hostname and DNS
 
-Attach a single app subdomain after the four-secret **Launch app** shell is already owned and production-ready. Operators touch only GitHub repository **variables**, **secrets**, and the manual **Custom domain** workflow. No local `.env`, provider-console edits, or app-source hostname embeds are part of the standard path.
+Configure the intended application subdomain after **Launch app** has deployed the shell to its repository-owned Vercel project. DNS is a required onboarding stage. Onboarding is complete only after authoritative/public DNS, HTTPS, the application page and exact production health revision pass at this hostname. The Vercel URL verifies an intermediate shell deployment.
+
+Operators configure GitHub repository **variables** and **secrets**, then run the manual **Custom domain** workflow. GitHub configuration and Actions provide the standard setup path; deployment-specific hostnames and provider identifiers stay outside template source.
 
 ## Prerequisites
 

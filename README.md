@@ -1,8 +1,8 @@
 # Free Personal Stack
 
-A reusable Next.js template with a **secrets-only launch** to Vercel. Start with a database-free landing page; add your product after the shell is deployed.
+A reusable Next.js template with GitHub-only onboarding: deploy a database-free shell to Vercel, configure its intended hostname through Cloudflare, and verify the application there.
 
-## Quickstart: template → four secrets → Launch app
+## Quickstart: template → credentials → deploy → DNS → verify
 
 1. Select **Use this template → Create a new repository** in GitHub. Use a lowercase name such as `my-application` (letters, digits and single hyphens; start with a letter). Create an independent repository, not a fork; leave **Template repository** disabled on your new app.
 2. In the generated repository, open **Settings → Secrets and variables → Actions → Repository secrets** and add these four entries:
@@ -19,14 +19,16 @@ A reusable Next.js template with a **secrets-only launch** to Vercel. Start with
 
 **This quickstart deploys the shell at a Vercel URL using GitHub configuration and Actions.** A Cloudflare-managed custom domain additionally requires `CLOUDFLARE_API_TOKEN` and repository variables `APP_HOSTNAME` and `CLOUDFLARE_ZONE_NAME`; follow the [custom-domain guide](docs/custom-domain.md). After editing secrets, manually run the relevant workflow. Once an owned project exists, later default-branch pushes may deploy it; pushes never create a project or adopt an unmarked one. The upstream template is blocked from self-deploying by numeric repository ID.
 
-See **[Secrets-only launch guide](docs/secrets-only-launch.md)** for account permissions, finding your team ID, database choices, interrupted-run recovery and verification limits. Optional subdomain after launch: **[Custom domain](docs/custom-domain.md)** (GitHub variables + manual workflow only). Maintainer local stub rehearsal (not live): **[New app runbook](docs/new-app-runbook.md)**.
+5. Complete the required hostname stage: configure `CLOUDFLARE_API_TOKEN`, `APP_HOSTNAME` and `CLOUDFLARE_ZONE_NAME`, then run **Custom domain** (`plan`, approved `apply`, `verify`). Follow the [custom-domain guide](docs/custom-domain.md). Onboarding is complete only after DNS, HTTPS, the page and exact deployed-revision checks pass at the intended hostname. The Vercel URL is an intermediate deployment result.
+
+See **[Secrets-only launch guide](docs/secrets-only-launch.md)** for shell-stage permissions, team ID, database choices and recovery. Required hostname setup: **[Custom domain](docs/custom-domain.md)**. Maintainer local stub rehearsal (not live): **[New app runbook](docs/new-app-runbook.md)**.
 
 ## What the initial deployment includes
 
 - A server-rendered **Application ready** page with no application database reads or writes, demo data or inherited navigation.
 - `/api/health` reporting process liveness and the exact deployed source revision; it does not certify database access, authentication or RLS.
 - Reusable auth code retained at `/auth/signin` and `/auth/signout`, without links from the landing shell. Authentication settings and database isolation still need review before product use.
-- An explicitly scoped, repository-owned Vercel project. No domain, database, schema, DNS or email provisioning in the initial launch (optional custom domain is a separate manual workflow).
+- An explicitly scoped, repository-owned Vercel project. The shell launcher handles deployment; the required hostname and DNS stage runs through the separate **Custom domain** workflow. Database/schema provisioning and email changes retain their own approval boundaries.
 
 Use an existing Supabase project, or create a dedicated project in Supabase before launch. A dedicated database is preferred for isolation. Reusing a shared project is your choice and carries shared-resource risk; configure app-scoped schema and RLS and verify cross-app isolation **before adding data features**. The launcher does not create provider databases or apply migrations. Free-plan limits and provider charges still apply.
 

@@ -2,6 +2,8 @@
 
 ## The short path
 
+This guide covers the shell-deployment stage of application onboarding. Continue with the required [hostname and DNS stage](custom-domain.md). Onboarding is complete only after DNS, HTTPS, the page and exact deployed-revision checks pass at the intended hostname; a working Vercel URL is an intermediate result.
+
 **Use this template → create a repository → fill four repository Actions secrets → Actions → Launch app → Run workflow (`deploy`).** No local `.env`, initial app-config edit or local tool installation is needed. Use the default branch, normally `main`, and leave recovery inputs empty for the first run. Editing secrets does not start a workflow; explicitly run it after setup.
 
 Generate an independent repository rather than a fork. Choose a lowercase repository slug starting with a letter, containing only letters, digits and single separating hyphens (at most 100 characters). Leave the generated repository's **Template repository** setting off. The Vercel project name comes from this slug. Immutable GitHub repository ID establishes ownership; the current default-branch commit SHA establishes source revision. No copied app-specific project ID, title, URL or SHA needs to be edited into source.
@@ -79,9 +81,9 @@ The root and health route do not query or mutate application tables. Reusable `/
 
 **Post-deployment data gate:** review app-scoped schema/table naming, migration ownership, least privilege, backup/recovery, RLS policies and cross-user/cross-app isolation tests before adding data-backed routes or UI. RLS remains **unverified** by this launch, particularly when reusing a shared database. Never treat a project-wide service-role key as proof of isolation. No migrations, schema creation, demo data operations or shared-database resets run through this launcher.
 
-## Optional custom domain
+## Required hostname and DNS
 
-After launch succeeds with a repository marker, see [custom-domain.md](custom-domain.md) for the manual **Custom domain** workflow (`plan` / `apply` / `verify`). It does not replace Launch app recovery for unmarked projects and never deploys source or changes Auth/database/zone settings.
+After the shell deployment succeeds with a repository marker, continue to [custom-domain.md](custom-domain.md) for the manual **Custom domain** workflow (`plan`, approved `apply`, `verify`). This is a required onboarding stage. Complete Launch app recovery first for an unmarked project. The domain workflow manages hostname attachment and approved DNS records while preserving source deployments, Auth, databases and zone settings.
 
 ## Advanced paths remain separate
 

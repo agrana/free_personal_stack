@@ -1133,6 +1133,19 @@ class CustomDomainTests(unittest.TestCase):
         self.assertNotIn('cf_offline_token', blob)
         self.assertNotIn('offline-github', blob)
 
+    def test_onboarding_requires_verified_hostname(self):
+        for name in ('AGENTS.md', 'README.md', 'docs/secrets-only-launch.md',
+                     'docs/custom-domain.md', 'docs/new-app-runbook.md'):
+            with self.subTest(document=name):
+                text = (ROOT / name).read_text().lower()
+                self.assertIn('onboarding is complete only after', text)
+                for requirement in ('dns', 'https', 'revision', 'hostname'):
+                    self.assertIn(requirement, text)
+                for obsolete in ('optional custom domain', 'optional post-launch custom domain',
+                                 'optional advanced cloudflare dns', 'custom domain (optional)'):
+                    self.assertNotIn(obsolete, text)
+        self.assertIn('## Required hostname and DNS', (ROOT / 'AGENTS.md').read_text())
+
     def test_docs_linked_from_launch_and_agents(self):
         self.assertIn('custom-domain.md', (ROOT / 'docs/secrets-only-launch.md').read_text())
         self.assertIn('custom-domain.md', (ROOT / 'AGENTS.md').read_text())

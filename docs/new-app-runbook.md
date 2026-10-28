@@ -15,7 +15,9 @@
 3. **Actions → Launch app → Run workflow** on the default branch. Operation `deploy`. Leave recovery inputs empty on the first run.
 4. Read the summary status (`page_and_health_verified`, `ready_but_verification_protected`, or `setup_required`). A green `setup_required` run is not launch success.
 
-No local `.env`, clone, app-config edit, custom DNS, Cloudflare account, service-role key, or Terraform credential is required for this shell. Secret edits do not start Actions. Details: [secrets-only-launch.md](secrets-only-launch.md).
+5. Complete the required [hostname and DNS stage](custom-domain.md): add secret `CLOUDFLARE_API_TOKEN`, set variables `APP_HOSTNAME` and `CLOUDFLARE_ZONE_NAME`, then run **Custom domain** (`plan`, approved `apply`, `verify`). Onboarding is complete only after DNS, HTTPS, the page and exact deployed-revision checks pass at the intended hostname.
+
+GitHub configuration and Actions provide this onboarding path. After editing secrets, manually run the relevant workflow. The four-secret shell deployment is an intermediate result. Details: [secrets-only-launch.md](secrets-only-launch.md).
 
 ### Optional secret-name placeholders
 

@@ -8,12 +8,12 @@ Use GitHub **Use this template** to generate an independent app repository, not 
 
 ## Primary onboarding: GitHub-only deployment
 
-The supported setup path is **generate repository → configure repository Actions secrets and variables for the requested operation → manually run its workflow** on the default branch. GitHub stores deployment configuration and credentials; Actions executes provider operations.
+The supported setup path is **generate repository → configure credentials and intended hostname → deploy the shell → configure DNS → verify the application at that hostname**. GitHub stores configuration and credentials; Actions executes provider operations on the default branch. A working Vercel URL proves the shell deployment stage. Application onboarding is complete only after the intended hostname passes DNS, HTTPS, page and exact deployed-revision checks.
 
 | Operation | Required configuration | Workflow |
 | --- | --- | --- |
 | Launch the database-free shell at a Vercel URL | Repository secrets `VERCEL_API_TOKEN`, `VERCEL_TEAM_ID`, `SUPABASE_URL` and `SUPABASE_ANON_KEY` (modern publishable key accepted) | **Launch app** (`deploy`) |
-| Add a Cloudflare-managed custom domain | Reuse the Vercel secrets; add repository secret `CLOUDFLARE_API_TOKEN` and variables `APP_HOSTNAME`, `CLOUDFLARE_ZONE_NAME`. The token needs Zone Read and DNS Edit for the intended zone; an account-owned or user-owned API token with those permissions is supported. | **Custom domain** (`plan`, approved `apply`, `verify`) |
+| Complete the required application hostname and DNS | Reuse the Vercel secrets; add repository secret `CLOUDFLARE_API_TOKEN` and variables `APP_HOSTNAME`, `CLOUDFLARE_ZONE_NAME`. The token needs Zone Read and DNS Edit for the intended zone; an account-owned or user-owned API token with those permissions is supported. | **Custom domain** (`plan`, approved `apply`, `verify`) |
 | Advanced Terraform or database operations | Use the credentials specified by that reviewed workflow and obtain its operation-specific approval. Database access additionally requires reviewed app-scoped grants and RLS. | Consult the advanced workflow and its safety gates |
 
 Initial setup uses GitHub configuration rather than a local `.env` or app-source edits. Keep service-role access restricted to separately reviewed privileged operations. After editing secrets, manually dispatch the relevant workflow to validate and apply the updated configuration. See `docs/secrets-only-launch.md` and `docs/custom-domain.md` for permissions, ownership recovery and verification.
@@ -24,11 +24,16 @@ Keep root layout and landing page database-free and free of inherited `Navigatio
 
 ## Data and resource ownership
 
-- Vercel hosts a distinct project for each application. Select the explicit intended team ID.
+- Each application owns a distinct Vercel project and an intended hostname. Select the explicit intended team ID and verify the hostname routes to that owned project.
 - Users may choose an existing Supabase project or create one externally before launch. Prefer a dedicated project/database for isolation; shared-project reuse is an explicit user choice with shared-resource risk. The launcher creates no database, schema, migrations or demo data.
 - Before enabling data features, require reviewed app-scoped schema/migration ownership, least privilege, RLS and cross-user/cross-app isolation tests. Shell deployment does not verify RLS. Service-role credentials bypass RLS and cannot prove isolation.
-- Optional advanced Cloudflare DNS and Terraform state remain separately scoped. Preserve other apps, database lifecycle, DNS zones and email settings. Provisioning/migrations require explicit review and backup/recovery planning.
-- Optional post-launch custom domain: GitHub variables `APP_HOSTNAME` and `CLOUDFLARE_ZONE_NAME`, secrets `VERCEL_API_TOKEN` / `VERCEL_TEAM_ID` / `CLOUDFLARE_API_TOKEN`, manual workflow **Custom domain** (`plan` / `apply` / `verify`). See `docs/custom-domain.md`. No local `.env`, no hardcoded host/project/zone IDs in template source, no deploy or Auth/database/zone-setting mutations.
+- Preserve other applications, database lifecycle, unrelated DNS records and email settings during onboarding. Keep Terraform state management and privileged database operations separately scoped, with their own review and backup/recovery requirements.
+
+## Required hostname and DNS
+
+DNS is a required onboarding stage. Use GitHub variables `APP_HOSTNAME` and `CLOUDFLARE_ZONE_NAME`, secrets `VERCEL_API_TOKEN` / `VERCEL_TEAM_ID` / `CLOUDFLARE_API_TOKEN`, and the manual **Custom domain** workflow (`plan`, approved `apply`, `verify`). Its separate workflow is an implementation boundary within normal onboarding. See `docs/custom-domain.md`.
+
+The domain workflow attaches the hostname to the owned Vercel project and manages only approved hostname records. Preserve deployment protection, other aliases, zone settings, Auth and database configuration. Keep deployment-specific identifiers in GitHub configuration and discovered provider state. Report the Vercel shell as an intermediate result until authoritative/public DNS, HTTPS, the application page and exact production health revision pass at `APP_HOSTNAME`. Data-backed features additionally require their own auth and RLS checks.
 
 ## Local developer verification
 
