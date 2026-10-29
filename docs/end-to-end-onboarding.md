@@ -29,7 +29,7 @@ Operator routine actions are Secrets setup and merge-request approval. Digest co
 
 | Stage | Current evidence and implementation | Remaining requirement |
 | --- | --- | --- |
-| Hostname and database intake | Tracked `onboarding.config.json` carries hostname/zone/`auto_apply`; approved database target and public Supabase configuration via Secrets | Database connection/migration/RLS orchestration still lacks a live workflow before claiming full onboarding |
+| Hostname and database intake | Tracked `onboarding.config.json` carries hostname/zone/`auto_apply`; approved database target and public Supabase configuration via Secrets; optional `database-onboarding.config.json` enables read-only catalog preflight ([database onboarding](database-onboarding.md)) | Database connection/migration/RLS orchestration still lacks a live workflow before claiming full onboarding; catalog preflight is not readiness |
 | Quality CI | `app-quality.yml` installs Podman on the runner and tests against disposable PostgreSQL; merge onboarding waits for current-head success | These tests remain fixture evidence, separate from the approved Supabase target |
 | Shell deployment | `merge-onboarding.yml` deploys under merge policy; `launch-app.yml` remains maintainer dispatch | Shell success is an intermediate result |
 | Hostname and DNS | Merge onboarding applies/verifies configured hostname; `custom-domain.yml` remains digest-based maintainer path | Confirm verify evidence per application hostname |

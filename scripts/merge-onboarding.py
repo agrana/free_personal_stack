@@ -4,8 +4,10 @@
 Triggered on default-branch push. Authorization is the merge-reviewed
 onboarding.config.json (auto_apply + hostname/zone). Never spoofs
 GITHUB_EVENT_NAME. Provider writes require a successful current-head App Quality
-run. Database connection/migration/RLS stages remain unimplemented and are
-reported explicitly — this path never claims full-app-ready.
+run. Optional opt-in database-onboarding.config.json runs read-only managed
+catalog preflight after quality and before shell writes; success does not
+authorize migrations. Database connection/migration/RLS stages remain
+unimplemented and are reported explicitly — this path never claims full-app-ready.
 
 Quality-gate selection policy: among runs that match the expected workflow path,
 head SHA, default branch, event, and repository identity, choose the highest
@@ -32,7 +34,8 @@ UPSTREAM_ID = '1051601680'
 PLACEHOLDER = 'SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE'
 SHELL_SECRETS = ('VERCEL_API_TOKEN', 'VERCEL_TEAM_ID', 'SUPABASE_URL', 'SUPABASE_ANON_KEY')
 DOMAIN_SECRETS = ('VERCEL_API_TOKEN', 'VERCEL_TEAM_ID', 'CLOUDFLARE_API_TOKEN')
-SECRET_ENV_KEYS = (*SHELL_SECRETS, 'CLOUDFLARE_API_TOKEN', 'GITHUB_TOKEN')
+DATABASE_PREFLIGHT_SECRETS = ('SUPABASE_URL', 'SUPABASE_ACCESS_TOKEN')
+SECRET_ENV_KEYS = (*SHELL_SECRETS, 'CLOUDFLARE_API_TOKEN', 'SUPABASE_ACCESS_TOKEN', 'GITHUB_TOKEN')
 QUALITY_WORKFLOW = 'app-quality.yml'
 QUALITY_WORKFLOW_PATH = '.github/workflows/' + QUALITY_WORKFLOW
 QUALITY_TIMEOUT_SEC = 1500
@@ -425,8 +428,8 @@ def extract_shell_binding(lines, expected_sha):
     raise Failure('shell_binding_missing')
 
 
-def database_gap_report():
-    return {
+def database_gap_report(preflight=None):
+    report = {
         'status': 'database_stages_unimplemented',
         'required_missing_stages': [
             'database_connection_verification',
@@ -437,8 +440,24 @@ def database_gap_report():
             'Merge-driven shell deploy and hostname/DNS do not complete onboarding. '
             'Live database/migration/RLS orchestration remains an implementation gap.'
         ),
+        'database_ready': False,
+        'live_migrations_authorized': False,
         'full_app_ready': False,
+        'catalog_inspection_completed': False,
     }
+    if isinstance(preflight, dict):
+        report['preflight_status'] = preflight.get('status')
+        if preflight.get('catalog_inspection_completed') is True:
+            report['catalog_inspection_completed'] = True
+            report['status'] = 'database_catalog_inspected_stages_incomplete'
+            report['note'] = (
+                'Read-only managed-service catalog preflight completed. '
+                'Shell/DNS may continue, but database readiness, live migrations, '
+                'and RLS isolation remain incomplete.'
+            )
+            if isinstance(preflight.get('required_next_steps'), list):
+                report['required_next_steps'] = list(preflight['required_next_steps'])
+    return report
 
 
 def finalize(artifact_dir, payload, code):
@@ -514,6 +533,40 @@ def run(source, binary, artifact_dir, *, quality_wait=None, sleeper=None, clock=
         repository_context(source)
         config = cfg_mod.load_onboarding_config(
             source, require_tracked_clean=True, expected_sha=sha)
+
+        db_preflight = load('database-preflight')
+        try:
+            preflight_report = db_preflight.run_for_merge(
+                source, expected_sha=sha, artifact_dir=Path(artifact_dir))
+        except db_preflight.PreflightError as exc:
+            result['status'] = 'database_preflight_failed'
+            result['stages']['database_preflight'] = {
+                'status': 'preflight_failed',
+                'error': str(exc),
+            }
+            result['database'] = database_gap_report(result['stages']['database_preflight'])
+            result['stages']['provider_writes'] = 'blocked'
+            return finalize(artifact_dir, result, 1)
+        result['stages']['database_preflight'] = {
+            'status': preflight_report.get('status'),
+            'catalog_inspection_completed': bool(
+                preflight_report.get('catalog_inspection_completed')),
+            'config_status': preflight_report.get('config_status'),
+        }
+        if preflight_report.get('status') == 'setup_required':
+            result['status'] = 'setup_required'
+            result['required_secret_names'] = list(
+                preflight_report.get('required_secret_names') or DATABASE_PREFLIGHT_SECRETS)
+            result['database'] = database_gap_report(preflight_report)
+            result['stages']['provider_writes'] = 'blocked'
+            return finalize(artifact_dir, result, 0)
+        if preflight_report.get('status') not in (
+                'preflight_disabled', 'catalog_inspection_completed'):
+            result['status'] = 'database_preflight_failed'
+            result['database'] = database_gap_report(preflight_report)
+            result['stages']['provider_writes'] = 'blocked'
+            return finalize(artifact_dir, result, 1)
+        result['database'] = database_gap_report(preflight_report)
 
         launch_env = {
             'APP_HOSTNAME': config['hostname'],
@@ -655,7 +708,7 @@ def run(source, binary, artifact_dir, *, quality_wait=None, sleeper=None, clock=
             verify_lines[-1] if verify_lines else {'status': 'no_output', 'returncode': verify_code})
 
         verify_status = (verify_lines[-1] or {}).get('status') if verify_lines else None
-        result['database'] = database_gap_report()
+        result['database'] = database_gap_report(preflight_report)
         if verify_status == 'verification_passed':
             result['status'] = 'infrastructure_dns_verified_database_incomplete'
             result['infrastructure_dns_ready'] = True
