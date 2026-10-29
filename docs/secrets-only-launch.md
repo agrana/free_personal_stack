@@ -2,17 +2,19 @@
 
 ## The short path
 
-**Use this template → create a repository → fill four repository Actions secrets → Actions → Launch app → Run workflow (`deploy`).** No local `.env`, initial app-config edit or local tool installation is needed. Use the default branch, normally `main`, and leave recovery inputs empty for the first run. Editing secrets does not start a workflow; explicitly run it after setup.
+This guide covers the shell-deployment stage of application onboarding. Configure the intended hostname/zone in `onboarding.config.json` and the approved database target via Supabase Secrets before project provisioning. Follow the [full onboarding contract](end-to-end-onboarding.md), including required database connection, schema migrations and [hostname/DNS setup](custom-domain.md). Onboarding is complete only after DNS, HTTPS, the page and exact deployed-revision checks pass at the intended hostname, runtime database access works, migrations are applied, and grants and RLS isolation are verified. The current live migration orchestration remains an implementation gap; a working Vercel URL is an intermediate result.
+
+**Use this template → create a repository → fill repository Actions secrets (four shell secrets plus `CLOUDFLARE_API_TOKEN` for DNS) → review/merge a prepared `onboarding.config.json` PR with hostname, zone, and `auto_apply: true`.** Default-branch push then runs **Merge onboarding** after App Quality succeeds. No local `.env` or Run workflow click is required for routine shell+DNS apply. Maintainer **Launch app** (`workflow_dispatch`) remains available for recovery and exceptional deploy.
 
 Generate an independent repository rather than a fork. Choose a lowercase repository slug starting with a letter, containing only letters, digits and single separating hyphens (at most 100 characters). Leave the generated repository's **Template repository** setting off. The Vercel project name comes from this slug. Immutable GitHub repository ID establishes ownership; the current default-branch commit SHA establishes source revision. No copied app-specific project ID, title, URL or SHA needs to be edited into source.
 
 ## Accounts and permissions
 
-- **GitHub:** permission to create the repository, manage its repository Actions secrets and manually run workflows. Organization policy must allow Actions and the workflow's referenced actions. Use a repository administrator for secret setup if your role cannot edit secrets. The runner uses the automatic `GITHUB_TOKEN` with `contents: read` for repository identity and revision discovery, not an owner PAT. It cannot manage repository secrets.
+- **GitHub:** permission to create the repository, manage its repository Actions secrets, and merge prepared onboarding-config PRs. Organization policy must allow Actions and the workflow's referenced actions. Use a repository administrator for secret setup if your role cannot edit secrets. The runner uses the automatic `GITHUB_TOKEN` with `contents: read` (and `actions: read` on Merge onboarding) for identity, revision and quality-gate discovery, not an owner PAT. It cannot manage repository secrets.
 - **Vercel:** a team in which your access token can discover the team/projects, create the app project, manage its production configuration and deploy. Find the public **Team ID** in the intended team's **Settings → General** (not the team slug, display name or a personal account ID). Store the full `team_…` value as `VERCEL_TEAM_ID`. Create an access token in Vercel account settings, scoped/authorized for that same team; organization SSO or role restrictions may require an administrator. Every provider operation is explicitly scoped to the selected team; the launcher does not choose a team from an ambiguous inventory.
 - **Supabase:** access to an existing project's URL and public key. You may use a project you already own or create one yourself in the provider dashboard before launch. A dedicated project/database is preferred for isolation. Reusing a shared project is supported as an explicit user choice with shared-resource risk. No database provider creation is automated.
 
-Cloudflare, a registrar, a custom domain, service-role credentials, a Supabase management token and Terraform state credentials are unnecessary for the initial Vercel-hosted shell. Provider limits and charges remain your responsibility. After the shell is owned and production-ready, an optional GitHub-only [custom domain](custom-domain.md) path can attach one subdomain via repository variables `APP_HOSTNAME` / `CLOUDFLARE_ZONE_NAME` and a zone-scoped Cloudflare token—still without local `.env` or app-source hostname embeds.
+The four shell secrets below plus `CLOUDFLARE_API_TOKEN` configure merge-driven shell deploy and hostname/DNS. Intended hostname and zone come from tracked `onboarding.config.json`, not mandatory GitHub variable steps. Account-owned and user-owned Cloudflare API tokens are supported with Zone Read and DNS Edit permissions for the intended zone. Maintainer [Custom domain](custom-domain.md) digest apply may still use repository variables. Advanced Terraform and privileged database operations have their own reviewed credential and approval requirements. Provider limits and charges remain your responsibility.
 
 ## Add the four secrets
 
@@ -45,20 +47,23 @@ Authenticate `gh` securely as the explicitly authorized repository owner/adminis
 
 ## Run and verify
 
-Open **Actions → Launch app → Run workflow**, select the current default branch and operation `deploy`. The initial manual run authorizes creation of the slug-named project, repository marker, public production configuration and deployment of the exact checked-out SHA. Missing permissions stop the run; do not weaken ownership checks to work around them.
+Routine path: merge `onboarding.config.json` with `auto_apply: true` and a required hostname/zone after Secrets are filled. **Merge onboarding** waits for successful current-head **App Quality**, then deploys the shell and applies hostname/DNS. Merge of that desired-state policy is the apply authorization. Missing permissions stop the run; do not weaken ownership checks to work around them.
 
-The workflow and launcher reject the upstream template's immutable numeric repository ID, template repositories, forks, identity mismatches, non-default-branch execution, stale SHAs and dirty source. Provider dependencies are installed before provider secrets enter the launch step. Mutations are serialized per repository and in-flight runs are not cancelled by later pushes.
+Maintainer path: **Actions → Launch app → Run workflow** on the default branch (`deploy`) still authorizes creation/recovery with optional exact project/repository IDs when automation is disabled or interrupted.
+
+The workflows and launchers reject the upstream template's immutable numeric repository ID, template repositories, forks, identity mismatches, non-default-branch execution, stale SHAs and dirty source. Provider dependencies are installed before provider secrets enter write steps. Mutations share concurrency group `app-provider-<repository_id>`.
 
 Read the summary, not just the job color:
 
-- `page_and_health_verified`: provider readback and HTTP checks matched the deployment and exact source SHA; the summary contains its verified Vercel URL.
-- `ready_but_verification_protected`: Vercel reports ready, but deployment protection blocks public checks. Open the deployment through your normal authorized Vercel session. This is **not** public verification success; the workflow does not disable protection or mint a bypass token.
-- `setup_required`: fill missing/placeholder secrets, then manually rerun.
+- `infrastructure_dns_verified_database_incomplete`: shell+hostname/DNS verified; database connection, migrations and RLS remain unimplemented — not full-app-ready.
+- `page_and_health_verified` (Launch app): provider readback and HTTP checks matched the deployment and exact source SHA.
+- `ready_but_verification_protected`: Vercel reports ready, but deployment protection blocks public checks. This is **not** public verification success.
+- `setup_required` / `onboarding_auto_apply_disabled`: fill Secrets or merge `auto_apply` policy; no provider writes.
 - A failure status: review the scoped error and recovery handles before retrying; no unrelated project is safe to overwrite.
 
 The server-rendered root says **Application ready**, with an optional platform-provided repository title and a generic fallback; no title environment variable is required. `/api/health` returns `status: ready`, `service: app` and the full immutable revision. It proves process liveness only, not database, authentication, email or DNS readiness. A browser review remains separate from HTTP verification.
 
-Later default-branch pushes can deploy **only the already-owned project**. A push cannot create a project or adopt an unmarked existing project. A manual `verify` operation performs no provider writes and requires the current revision and public configuration already deployed. Rerunning an already-ready revision with unchanged public settings verifies it without another deployment. After changing public Supabase secrets, manually run `deploy`: a configuration fingerprint causes a rebuild even at the same source SHA. Saving secrets alone emits no workflow event.
+With `auto_apply: false` (template default), merge onboarding reports disabled and writes nothing. An unchanged rerun is idempotent. Saving secrets alone does not authorize apply until the reviewed config is merged.
 
 ## Ownership and interrupted creation recovery
 
@@ -68,7 +73,7 @@ If creation was interrupted before the marker was saved:
 
 1. Review the emitted `project_created_recovery_handle` / `project_readback` ID in the run summary and independently inspect the exact project's name, team and creation context in Vercel.
 2. Confirm it is the intended new app, not another application's project. Obtain this generated repository's numeric ID from GitHub repository metadata; do not use its name or the upstream ID.
-3. Manually run **Launch app** with operation `deploy`, `expected_project_id` set to that exact reviewed `prj_…` ID and `confirm_repository_id` set to this repository's numeric ID.
+3. Recover via maintainer **Launch app** dispatch with exact `expected_project_id` and `confirm_repository_id`, or merge that same pair into the corresponding `onboarding.config.json` recovery fields with `auto_apply: true` for the next Merge onboarding run.
 4. The runner validates exact team/name/project/repository identity before adding a missing marker. Any mismatch refuses recovery; no input authorizes overwriting another repository's marker.
 
 Do not delete or edit ownership markers to force adoption. Repository renames can change the derived project slug; treat resulting collisions/mismatches as a review requirement, not permission to migrate or overwrite resources. There is no automatic destroy/rollback of provider resources; inspect partial progress before any separately authorized cleanup.
@@ -79,9 +84,9 @@ The root and health route do not query or mutate application tables. Reusable `/
 
 **Post-deployment data gate:** review app-scoped schema/table naming, migration ownership, least privilege, backup/recovery, RLS policies and cross-user/cross-app isolation tests before adding data-backed routes or UI. RLS remains **unverified** by this launch, particularly when reusing a shared database. Never treat a project-wide service-role key as proof of isolation. No migrations, schema creation, demo data operations or shared-database resets run through this launcher.
 
-## Optional custom domain
+## Required hostname and DNS
 
-After launch succeeds with a repository marker, see [custom-domain.md](custom-domain.md) for the manual **Custom domain** workflow (`plan` / `apply` / `verify`). It does not replace Launch app recovery for unmarked projects and never deploys source or changes Auth/database/zone settings.
+Hostname and zone belong in `onboarding.config.json`. With `auto_apply: true`, **Merge onboarding** performs attachment and DNS after shell deploy. Maintainer [custom-domain.md](custom-domain.md) digest apply remains available. Complete recovery first for an unmarked project. Automation manages only the configured hostname's attachment and DNS-only CNAME while preserving source deployments, Auth, databases and zone settings.
 
 ## Advanced paths remain separate
 

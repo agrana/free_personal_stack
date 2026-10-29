@@ -378,14 +378,19 @@ class CustomDomainTests(unittest.TestCase):
         self.assertIn('--approved-plan-digest "$APPROVED_PLAN_DIGEST"', wf)
         launch = (ROOT / '.github/workflows/launch-app.yml').read_text()
         self.assertIn('app-provider-${{ github.repository_id }}', launch)
+        self.assertNotRegex(launch.split('jobs:', 1)[0], r'(?m)^\s+push:\s*$')
         self.assertNotIn('alfonsograna.com', wf)
         self.assertIn("github.repository_id != '1051601680'", wf)
+        merge = (ROOT / '.github/workflows/merge-onboarding.yml').read_text()
+        self.assertIn('app-provider-${{ github.repository_id }}', merge)
+        self.assertIn('onboarding.config.json', (ROOT / 'docs/custom-domain.md').read_text())
         docs = (ROOT / 'docs/custom-domain.md').read_text()
         self.assertIn('app.example.com', docs)
         self.assertNotRegex(docs, r'agrana|alfonsograna\.com')
         self.assertIn('team_…', docs)
         self.assertIn('build_plan()', docs)
         self.assertIn('selected team', docs.lower())
+        self.assertIn('auto_apply', docs)
 
     def test_setup_required_no_provider_writes(self):
         for key in ('VERCEL_API_TOKEN', 'CLOUDFLARE_API_TOKEN', 'APP_HOSTNAME'):
@@ -1132,6 +1137,39 @@ class CustomDomainTests(unittest.TestCase):
         self.assertNotIn('offline-token', blob)
         self.assertNotIn('cf_offline_token', blob)
         self.assertNotIn('offline-github', blob)
+
+    def test_onboarding_requires_verified_hostname(self):
+        for name in ('AGENTS.md', 'README.md', 'docs/secrets-only-launch.md',
+                     'docs/custom-domain.md', 'docs/new-app-runbook.md'):
+            with self.subTest(document=name):
+                text = (ROOT / name).read_text().lower()
+                self.assertIn('onboarding is complete only after', text)
+                for requirement in ('dns', 'https', 'revision', 'hostname'):
+                    self.assertIn(requirement, text)
+                for obsolete in ('optional custom domain', 'optional post-launch custom domain',
+                                 'optional advanced cloudflare dns', 'custom domain (optional)'):
+                    self.assertNotIn(obsolete, text)
+        self.assertIn('## Required hostname and DNS', (ROOT / 'AGENTS.md').read_text())
+
+    def test_operator_contract_requires_github_database_and_migrations(self):
+        for name in ('AGENTS.md', 'README.md', 'docs/secrets-only-launch.md',
+                     'docs/custom-domain.md', 'docs/new-app-runbook.md'):
+            with self.subTest(document=name):
+                text = (ROOT / name).read_text().lower()
+                for requirement in ('database', 'migration', 'rls', 'end-to-end-onboarding.md'):
+                    self.assertIn(requirement, text)
+        agents = (ROOT / 'AGENTS.md').read_text()
+        self.assertIn('## Verification through GitHub Actions', agents)
+        self.assertIn('Before provisioning an application project', agents)
+        self.assertNotIn('Database integration requires Podman', agents)
+        self.assertNotIn('npm ci', agents)
+        self.assertIn('implementation gap', agents)
+        self.assertTrue((ROOT / 'docs/maintainer-verification.md').is_file())
+        status = (ROOT / 'docs/end-to-end-onboarding.md').read_text()
+        self.assertIn('current migration workflow', agents)
+        self.assertIn('explicitly disables live migrations', status)
+        quality = (ROOT / '.github/workflows/app-quality.yml').read_text()
+        self.assertIn('sudo apt-get install -y podman', quality)
 
     def test_docs_linked_from_launch_and_agents(self):
         self.assertIn('custom-domain.md', (ROOT / 'docs/secrets-only-launch.md').read_text())

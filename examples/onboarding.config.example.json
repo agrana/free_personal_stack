@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "hostname": null,
+  "cloudflare_zone_name": null,
+  "auto_apply": false,
+  "expected_project_id": null,
+  "confirm_repository_id": null
+}
