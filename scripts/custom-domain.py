@@ -9,6 +9,15 @@ Does not deploy source, touch Auth/database, alter zone/nameserver/email
 settings, force-move domains, or invent TXT challenges. A post-attach TXT
 challenge becomes a staged plan whose digest is produced by the same
 canonical build_plan() body used for subsequent apply.
+
+Merge-policy mode (authorization-mode=merge_policy, push + reviewed
+onboarding.config.json auto_apply) authorizes only the configured hostname/zone
+CNAME and scoped _vercel.<hostname> TXT challenges without a human digest.
+Merge mode requires the production app deployment SHA to equal the quality-approved
+automation source SHA and binds optional expected project/deployment IDs from the
+shell stage. Manual digest mode intentionally allows automation SHA != app SHA.
+Standalone workflow_dispatch keeps digest approval. Push without validated
+merge policy remains rejected.
 """
 from __future__ import annotations
 
@@ -47,10 +56,13 @@ CF_API = 'https://api.cloudflare.com/client/v4'
 PUBLIC_RESOLVERS = ('1.1.1.1', '8.8.8.8')
 VERIFY_ATTEMPTS = 3
 VERIFY_SLEEP_SEC = 2
+MERGE_POLICY_REPLAN_BOUND = 4
 PRODUCTION_NULL_FIELDS = ('gitBranch', 'customEnvironmentId', 'redirect', 'redirectStatusCode')
 BLOCKED_CNAME_LABELS = frozenset({
     'localhost', 'metadata', 'internal',
 })
+AUTH_MODE_MANUAL = 'manual_digest'
+AUTH_MODE_MERGE = 'merge_policy'
 # Authenticated Vercel recommendedCNAME is the trust boundary after syntactic checks.
 # Reject IP literals / local-only hosts; do not fetch arbitrary URLs.
 
@@ -89,6 +101,28 @@ def identifier(value, prefix):
     if not isinstance(value, str) or not re.fullmatch(prefix + r'[A-Za-z0-9]+', value):
         raise Failure('identifier_invalid')
     return value
+
+
+def optional_binding_id(value, prefix, label):
+    if value is None or value == '':
+        return None
+    if not isinstance(value, str) or not re.fullmatch(prefix + r'[A-Za-z0-9]+', value):
+        raise Failure(label + '_invalid')
+    return value
+
+
+def assert_merge_deployment_binding(
+        authorization_mode, automation_sha, app_sha, project_id, deployment_id,
+        expected_project_id=None, expected_deployment_id=None):
+    """Merge mode: exact quality SHA + optional shell project/deployment IDs."""
+    if authorization_mode != AUTH_MODE_MERGE:
+        return
+    if app_sha != automation_sha:
+        raise Failure('merge_app_deployment_sha_mismatch')
+    if expected_project_id is not None and project_id != expected_project_id:
+        raise Failure('expected_project_mismatch')
+    if expected_deployment_id is not None and deployment_id != expected_deployment_id:
+        raise Failure('expected_deployment_mismatch')
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -198,7 +232,23 @@ def validate_hostname_under_zone(hostname, zone):
     return host, zone_name
 
 
-def context(source):
+def load_merge_policy(source, sha):
+    if os.environ.get('ONBOARDING_MERGE_POLICY') != '1':
+        raise Failure('event_not_authorized')
+    cfg = load('onboarding-config')
+    try:
+        config = cfg.load_onboarding_config(
+            source, require_tracked_clean=True, expected_sha=sha)
+    except cfg.ConfigError as exc:
+        raise Failure(str(exc)) from None
+    if not config['auto_apply']:
+        raise Failure('onboarding_auto_apply_disabled')
+    if not config['hostname'] or not config['cloudflare_zone_name']:
+        raise Failure('hostname_required_before_provisioning')
+    return config
+
+
+def context(source, authorization_mode=AUTH_MODE_MANUAL):
     repo = os.environ.get('GITHUB_REPOSITORY', '')
     rid = os.environ.get('GITHUB_REPOSITORY_ID', '')
     sha = os.environ.get('GITHUB_SHA', '')
@@ -218,15 +268,25 @@ def context(source):
     branch = metadata.get('default_branch')
     if not isinstance(branch, str) or not branch:
         raise Failure('default_branch_invalid')
-    if (os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch'
-            or os.environ.get('GITHUB_REF') != 'refs/heads/' + branch):
+    event = os.environ.get('GITHUB_EVENT_NAME')
+    policy = None
+    if event == 'workflow_dispatch':
+        if authorization_mode != AUTH_MODE_MANUAL:
+            raise Failure('event_not_authorized')
+    elif event == 'push':
+        if authorization_mode != AUTH_MODE_MERGE:
+            raise Failure('event_not_authorized')
+        policy = load_merge_policy(source, sha)
+    else:
+        raise Failure('event_not_authorized')
+    if os.environ.get('GITHUB_REF') != 'refs/heads/' + branch:
         raise Failure('event_not_authorized')
     remote = github('/repos/' + repo + '/commits/' + urllib.parse.quote(branch, safe=''))
     if remote.get('sha') != sha or command(['git', 'rev-parse', 'HEAD'], source) != sha:
         raise Failure('automation_sha_mismatch')
     if command(['git', 'status', '--porcelain', '--untracked-files=all'], source):
         raise Failure('source_dirty')
-    return rid, slug, sha, repo
+    return rid, slug, sha, repo, policy
 
 
 def cf_request(method, path, token, payload=None, query=None):
@@ -581,6 +641,21 @@ def challenge_in_scope(challenge, hostname, zone_name):
     return False
 
 
+def challenge_in_merge_policy(challenge, hostname):
+    """Auto-apply permits only provider TXT at _vercel.<configured-hostname>."""
+    if not isinstance(challenge, dict) or challenge.get('type') != 'TXT':
+        return False
+    domain = challenge.get('domain')
+    value = challenge.get('value')
+    if not isinstance(domain, str) or not isinstance(value, str) or not value.strip():
+        return False
+    try:
+        name = normalize_dns_name(domain)
+    except Failure:
+        return False
+    return name == '_vercel.' + hostname
+
+
 def challenge_views(challenges):
     views = []
     if not isinstance(challenges, list):
@@ -670,20 +745,27 @@ def plan_body_from_public(plan):
     return {k: plan[k] for k in PLAN_BODY_KEYS() if k in plan}
 
 
-def build_plan(source, binary, artifact_dir):
+def build_plan(source, binary, artifact_dir, authorization_mode=AUTH_MODE_MANUAL,
+               expected_project_id=None, expected_deployment_id=None):
     setup = missing_setup()
     if setup:
         emit(**setup)
         write_artifact(artifact_dir, 'custom-domain-setup-required.json', setup)
         return 0, setup
 
-    rid, slug, automation_sha, repo = context(source)
+    rid, slug, automation_sha, repo, policy = context(source, authorization_mode)
     hostname, zone_name = validate_hostname_under_zone(
         os.environ['APP_HOSTNAME'], os.environ['CLOUDFLARE_ZONE_NAME'])
+    if policy is not None:
+        if hostname != policy['hostname'] or zone_name != policy['cloudflare_zone_name']:
+            raise Failure('hostname_policy_mismatch')
     team = identifier(os.environ['VERCEL_TEAM_ID'], 'team_')
     token = os.environ['VERCEL_API_TOKEN']
     cf_token = os.environ['CLOUDFLARE_API_TOKEN']
     vercel = load('check-vercel-access')
+    expected_project_id = optional_binding_id(expected_project_id, 'prj_', 'expected_project_id')
+    expected_deployment_id = optional_binding_id(
+        expected_deployment_id, 'dpl_', 'expected_deployment_id')
 
     teams = vercel_items(vercel, '/v2/teams', 'teams', token)
     if len([t for t in teams if t.get('id') == team]) != 1:
@@ -697,6 +779,8 @@ def build_plan(source, binary, artifact_dir):
 
     candidate = matches[0]
     pid = identifier(candidate.get('id'), 'prj_')
+    if expected_project_id is not None and pid != expected_project_id:
+        raise Failure('expected_project_mismatch')
     project = vercel.get_json(
         '/v9/projects/' + pid + '?' + urllib.parse.urlencode({'teamId': team}), token)
     if project.get('id') != pid or project.get('name') != slug or project.get('accountId') != team:
@@ -739,6 +823,10 @@ def build_plan(source, binary, artifact_dir):
         return 0, blocker
 
     deployment_id, app_sha, remote = production_deployment(vercel, token, team, project, rid)
+    assert_merge_deployment_binding(
+        authorization_mode, automation_sha, app_sha, pid, deployment_id,
+        expected_project_id=expected_project_id,
+        expected_deployment_id=expected_deployment_id)
     confirm_commit_in_repo(repo, app_sha)
     zone_id, account_id, zone_ns = resolve_zone(cf_token, zone_name)
     records = dns_records_for_name(cf_token, zone_id, hostname)
@@ -768,11 +856,29 @@ def build_plan(source, binary, artifact_dir):
         challenges = project_domain.get('verification') or []
         if not isinstance(challenges, list):
             raise Failure('verification_challenge_invalid')
-        txt = [c for c in challenges if challenge_in_scope(c, hostname, zone_name)]
-        out_of_scope = [c for c in challenges if isinstance(c, dict) and c.get('type') == 'TXT'
-                        and c not in txt]
-        if out_of_scope:
-            raise Failure('verification_challenge_out_of_scope')
+        if authorization_mode == AUTH_MODE_MERGE:
+            txt = [c for c in challenges if challenge_in_merge_policy(c, hostname)]
+            out_of_scope = [c for c in challenges if isinstance(c, dict) and c.get('type') == 'TXT'
+                            and c not in txt]
+            if out_of_scope:
+                blocker = {
+                    'status': 'policy_extension_required',
+                    'reason': 'txt_challenge_outside_merge_policy',
+                    'allowed_txt_name': '_vercel.' + hostname,
+                    'hostname': hostname,
+                    'zone_name': zone_name,
+                    'repository_id': rid,
+                    'project_id': pid,
+                }
+                emit(**blocker)
+                write_artifact(artifact_dir, 'custom-domain-policy-extension.json', blocker)
+                return 1, blocker
+        else:
+            txt = [c for c in challenges if challenge_in_scope(c, hostname, zone_name)]
+            out_of_scope = [c for c in challenges if isinstance(c, dict) and c.get('type') == 'TXT'
+                            and c not in txt]
+            if out_of_scope:
+                raise Failure('verification_challenge_out_of_scope')
         # Canonical challenge order so API array shuffle does not invalidate digests.
         txt = sorted(
             txt,
@@ -925,7 +1031,9 @@ def txt_content_matches(content, value):
     return content in (value, '"' + value + '"')
 
 
-def revalidate_apply_state(source, plan, completed, vercel, token, cf_token, before_first_write=False):
+def revalidate_apply_state(source, plan, completed, vercel, token, cf_token, before_first_write=False,
+                           authorization_mode=AUTH_MODE_MANUAL,
+                           expected_project_id=None, expected_deployment_id=None):
     """Recheck ownership, production target, recommendation, routing, challenges, DNS.
 
     Accounts for exact completed writes from this apply. Remaining API-level
@@ -933,7 +1041,7 @@ def revalidate_apply_state(source, plan, completed, vercel, token, cf_token, bef
     be eliminated without provider transactions; concurrency only serializes
     same-app workflows.
     """
-    rid, slug, automation_sha, repo = context(source)
+    rid, slug, automation_sha, repo, _policy = context(source, authorization_mode)
     if (rid != plan['repository_id'] or slug != plan['project_name']
             or automation_sha != plan['automation_source_sha']):
         raise Failure('source_changed_replanning_required')
@@ -941,9 +1049,21 @@ def revalidate_apply_state(source, plan, completed, vercel, token, cf_token, bef
     pid = plan['project_id']
     hostname = plan['hostname']
     zone_id = plan['zone_id']
+    expected_project_id = optional_binding_id(expected_project_id, 'prj_', 'expected_project_id')
+    expected_deployment_id = optional_binding_id(
+        expected_deployment_id, 'dpl_', 'expected_deployment_id')
+    if expected_project_id is not None and pid != expected_project_id:
+        raise Failure('expected_project_mismatch')
     project = revalidate_owned(vercel, token, team, pid, slug, rid)
     deployment_id, app_sha, _remote = production_deployment(vercel, token, team, project, rid)
+    assert_merge_deployment_binding(
+        authorization_mode, automation_sha, app_sha, pid, deployment_id,
+        expected_project_id=expected_project_id,
+        expected_deployment_id=expected_deployment_id)
     if deployment_id != plan['app_deployment_id'] or app_sha != plan['app_deployment_sha']:
+        # Merge mode must not silently adopt rollback A->B or same-SHA redeploy drift.
+        if authorization_mode == AUTH_MODE_MERGE:
+            raise Failure('expected_deployment_mismatch')
         raise Failure('deployment_changed_replanning_required')
     confirm_commit_in_repo(repo, app_sha)
     config = vercel.get_json(
@@ -1002,7 +1122,10 @@ def revalidate_apply_state(source, plan, completed, vercel, token, cf_token, bef
                 raise Failure('verification_challenge_changed')
             for challenge in live_challenges:
                 if isinstance(challenge, dict) and challenge.get('type') == 'TXT':
-                    if not challenge_in_scope(challenge, hostname, plan['zone_name']):
+                    if authorization_mode == AUTH_MODE_MERGE:
+                        if not challenge_in_merge_policy(challenge, hostname):
+                            raise Failure('policy_extension_required')
+                    elif not challenge_in_scope(challenge, hostname, plan['zone_name']):
                         raise Failure('verification_challenge_out_of_scope')
 
     records = dns_records_for_name(cf_token, zone_id, hostname)
@@ -1052,16 +1175,26 @@ def revalidate_apply_state(source, plan, completed, vercel, token, cf_token, bef
     return project, domain, app_sha
 
 
-def apply_plan(source, binary, artifact_dir, approved_digest):
-    if not approved_digest or not re.fullmatch(r'[0-9a-f]{64}', approved_digest):
-        raise Failure('approved_plan_digest_required')
-    code, plan = build_plan(source, binary, artifact_dir)
+def apply_plan(source, binary, artifact_dir, approved_digest, authorization_mode=AUTH_MODE_MANUAL,
+               expected_project_id=None, expected_deployment_id=None):
+    if authorization_mode == AUTH_MODE_MANUAL:
+        if not approved_digest or not re.fullmatch(r'[0-9a-f]{64}', approved_digest):
+            raise Failure('approved_plan_digest_required')
+    code, plan = build_plan(
+        source, binary, artifact_dir, authorization_mode,
+        expected_project_id=expected_project_id,
+        expected_deployment_id=expected_deployment_id)
+    if plan.get('status') == 'policy_extension_required':
+        return code
     if plan.get('status') != 'plan':
         return code
     if plan.get('ownership') == 'missing_marker':
         raise Failure('unmarked_project_requires_explicit_recovery')
-    if plan.get('digest') != approved_digest:
+    if authorization_mode == AUTH_MODE_MANUAL and plan.get('digest') != approved_digest:
         raise Failure('approved_plan_digest_mismatch')
+    if authorization_mode == AUTH_MODE_MERGE:
+        # Merge of auto_apply desired-state is the authorization; bind the live digest.
+        approved_digest = plan['digest']
     mutations = plan.get('proposed_mutations') or []
     if not mutations:
         emit(status='already_configured', digest=plan['digest'],
@@ -1082,12 +1215,18 @@ def apply_plan(source, binary, artifact_dir, approved_digest):
     completed = []
     try:
         revalidate_apply_state(
-            source, plan, completed, vercel, token, cf_token, before_first_write=True)
+            source, plan, completed, vercel, token, cf_token, before_first_write=True,
+            authorization_mode=authorization_mode,
+            expected_project_id=expected_project_id,
+            expected_deployment_id=expected_deployment_id)
 
         for mutation in mutations:
             action = mutation['action']
             revalidate_apply_state(
-                source, plan, completed, vercel, token, cf_token, before_first_write=False)
+                source, plan, completed, vercel, token, cf_token, before_first_write=False,
+                authorization_mode=authorization_mode,
+                expected_project_id=expected_project_id,
+                expected_deployment_id=expected_deployment_id)
             if action == 'vercel_add_project_domain':
                 if any(c.get('action') == action for c in completed):
                     continue
@@ -1121,7 +1260,10 @@ def apply_plan(source, binary, artifact_dir, approved_digest):
                     if any(c.get('action') == 'cloudflare_create_cname' for c in completed):
                         break
                     revalidate_apply_state(
-                        source, plan, completed, vercel, token, cf_token, before_first_write=False)
+                        source, plan, completed, vercel, token, cf_token, before_first_write=False,
+                        authorization_mode=authorization_mode,
+                        expected_project_id=expected_project_id,
+                        expected_deployment_id=expected_deployment_id)
                     current = dns_records_for_name(cf_token, zone_id, hostname)
                     matching = [r for r in current
                                 if r.get('type') == 'CNAME'
@@ -1158,13 +1300,30 @@ def apply_plan(source, binary, artifact_dir, approved_digest):
                             'content': follow['content'],
                         })
                 if created.get('verified') is not True:
-                    # Canonical staged approval: same build_plan() body/digest as next apply.
-                    _code, live = build_plan(source, binary, artifact_dir)
+                    # Canonical staged plan: same build_plan() body/digest as next apply.
+                    _code, live = build_plan(
+                        source, binary, artifact_dir, authorization_mode,
+                        expected_project_id=expected_project_id,
+                        expected_deployment_id=expected_deployment_id)
+                    if live.get('status') == 'policy_extension_required':
+                        return _code
                     if live.get('status') != 'plan' or live.get('ownership') == 'missing_marker':
                         raise Failure('postattach_plan_invalid')
                     if not live.get('proposed_mutations'):
                         raise Failure('domain_attach_unverified_without_challenge')
-                    # Diagnostics stay outside the hashed plan body.
+                    if authorization_mode == AUTH_MODE_MERGE:
+                        # Desired-state merge authorizes in-policy continuation; emit for replan loop.
+                        staged = {
+                            **live,
+                            'status': 'requires_additional_approval',
+                            'completed_mutations': completed,
+                            'previous_approved_digest': approved_digest,
+                            'merge_policy_continuation': True,
+                            'artifact': 'custom-domain-staged-plan.json',
+                        }
+                        write_artifact(artifact_dir, 'custom-domain-staged-plan.json', staged)
+                        emit(**staged)
+                        return 1
                     staged = {
                         **live,
                         'status': 'requires_additional_approval',
@@ -1231,9 +1390,11 @@ def apply_plan(source, binary, artifact_dir, approved_digest):
                         txt_content_matches(r.get('content'), approved_value)
                         for approved_value in approved_values) for r in current):
                     raise Failure('txt_conflict_before_write')
-                if not challenge_in_scope(
-                        {'type': 'TXT', 'domain': name, 'value': value, 'reason': 'apply'},
-                        hostname, plan['zone_name']):
+                challenge = {'type': 'TXT', 'domain': name, 'value': value, 'reason': 'apply'}
+                if authorization_mode == AUTH_MODE_MERGE:
+                    if not challenge_in_merge_policy(challenge, hostname):
+                        raise Failure('policy_extension_required')
+                elif not challenge_in_scope(challenge, hostname, plan['zone_name']):
                     raise Failure('verification_challenge_out_of_scope')
                 created = cf_request('POST', '/zones/' + zone_id + '/dns_records', cf_token, {
                     'type': 'TXT',
@@ -1264,7 +1425,10 @@ def apply_plan(source, binary, artifact_dir, approved_digest):
         # Final readiness: staged pending paths return earlier. apply_complete needs
         # attachment + production routing + verified + matching non-proxied CNAME.
         _project, domain, app_sha = revalidate_apply_state(
-            source, plan, completed, vercel, token, cf_token, before_first_write=False)
+            source, plan, completed, vercel, token, cf_token, before_first_write=False,
+            authorization_mode=authorization_mode,
+            expected_project_id=expected_project_id,
+            expected_deployment_id=expected_deployment_id)
         if domain is None:
             raise Failure('domain_not_attached_at_completion')
         assert_production_domain_routing(domain)
@@ -1280,7 +1444,18 @@ def apply_plan(source, binary, artifact_dir, approved_digest):
         if not final_cname:
             raise Failure('dns_cname_required_at_completion')
     except Failure as exc:
-        emit(status='apply_partial_checkpoint', error=str(exc),
+        status = str(exc)
+        if authorization_mode == AUTH_MODE_MERGE and status in (
+                'cname_recommendation_changed',
+                'policy_extension_required',
+                'expected_deployment_mismatch',
+                'expected_project_mismatch',
+                'merge_app_deployment_sha_mismatch',
+                'source_changed_replanning_required'):
+            emit(status=status, completed_mutations=completed, digest=plan.get('digest'),
+                 hostname=hostname)
+            return 1
+        emit(status='apply_partial_checkpoint', error=status,
              completed_mutations=completed, digest=plan['digest'],
              note='Replan after discovering exact owned state; no automatic cleanup')
         return 1
@@ -1299,6 +1474,35 @@ def apply_plan(source, binary, artifact_dir, approved_digest):
              ),
          })
     return 0
+
+
+def apply_merge_policy(source, binary, artifact_dir,
+                       expected_project_id=None, expected_deployment_id=None):
+    """Bounded internal digest apply under reviewed auto_apply desired-state policy."""
+    last_code = 1
+    for _attempt in range(MERGE_POLICY_REPLAN_BOUND):
+        last_code = apply_plan(
+            source, binary, artifact_dir, '', AUTH_MODE_MERGE,
+            expected_project_id=expected_project_id,
+            expected_deployment_id=expected_deployment_id)
+        staged = Path(artifact_dir) / 'custom-domain-staged-plan.json'
+        if staged.is_file():
+            try:
+                payload = json.loads(staged.read_text(encoding='utf-8'))
+            except ValueError:
+                return last_code
+            if payload.get('status') == 'policy_extension_required':
+                return last_code
+            if payload.get('status') == 'requires_additional_approval' and payload.get(
+                    'merge_policy_continuation'):
+                staged.unlink(missing_ok=True)
+                continue
+        if last_code == 0:
+            return 0
+        # Orchestrator may re-invoke the script for cname_recommendation_changed.
+        return last_code
+    emit(status='merge_policy_replan_bound_exceeded')
+    return 1
 
 
 def get_page(url):
@@ -1477,25 +1681,32 @@ def verification_result_finalize(artifact_dir, result):
     """Persist + emit verify evidence for every exit path (never omit the artifact)."""
     result = dict(result)
     result.setdefault('artifact', 'custom-domain-verify.json')
-    if 'checks' in result:
+    checks = result.get('checks')
+    if isinstance(checks, dict):
         result.setdefault(
-            'pending_checks', [k for k, v in result['checks'].items() if v == 'pending'])
+            'pending_checks', [k for k, v in checks.items() if v == 'pending'])
         result.setdefault(
-            'failed_checks', [k for k, v in result['checks'].items() if v == 'failed'])
+            'failed_checks', [k for k, v in checks.items() if v == 'failed'])
         result.setdefault('failure_reasons', sorted(set(result.get('failure_reasons') or [])))
+    elif 'checks' in result and checks is None:
+        result.pop('checks', None)
     write_artifact(artifact_dir, 'custom-domain-verify.json', result)
     emit(**result)
     return 0 if result.get('status') == 'verification_passed' else 1
 
 
-def verify_domain(source, binary, artifact_dir):
+def verify_domain(source, binary, artifact_dir, authorization_mode=AUTH_MODE_MANUAL,
+                  expected_project_id=None, expected_deployment_id=None):
     checks = None
     failures = []
     plan = None
     hostname = None
     app_sha = None
     try:
-        code, plan = build_plan(source, binary, artifact_dir)
+        code, plan = build_plan(
+            source, binary, artifact_dir, authorization_mode,
+            expected_project_id=expected_project_id,
+            expected_deployment_id=expected_deployment_id)
         if plan.get('status') != 'plan':
             return code
         if plan.get('ownership') == 'missing_marker':
@@ -1508,6 +1719,14 @@ def verify_domain(source, binary, artifact_dir):
         token = os.environ['VERCEL_API_TOKEN']
         vercel = load('check-vercel-access')
         nameservers = plan.get('zone_name_servers') or []
+        # Recheck shell-bound IDs at verify entry (planning already bound).
+        assert_merge_deployment_binding(
+            authorization_mode, plan['automation_source_sha'], app_sha, pid,
+            plan['app_deployment_id'],
+            expected_project_id=optional_binding_id(
+                expected_project_id, 'prj_', 'expected_project_id'),
+            expected_deployment_id=optional_binding_id(
+                expected_deployment_id, 'dpl_', 'expected_deployment_id'))
 
         checks = {
             'provider_domain_attached': 'pending',
@@ -1644,11 +1863,13 @@ def verify_domain(source, binary, artifact_dir):
                     failures.append(key)
             if final_readiness != 'ready':
                 failures.append('provider_readiness_' + final_readiness)
-            _dpl, live_sha, _remote = production_deployment(
+            live_dpl, live_sha, _remote = production_deployment(
                 vercel, token, team, project, plan['repository_id'])
-            if live_sha != app_sha:
+            if live_sha != app_sha or live_dpl != plan['app_deployment_id']:
                 checks['production_sha_stable'] = 'failed'
-                failures.append('production_sha_changed_during_verify')
+                failures.append('production_deployment_changed_during_verify')
+                if authorization_mode == AUTH_MODE_MERGE:
+                    raise Failure('expected_deployment_mismatch')
             else:
                 checks['production_sha_stable'] = 'passed'
         except Failure as exc:
@@ -1679,26 +1900,30 @@ def verify_domain(source, binary, artifact_dir):
         })
     except Failure as exc:
         # Plan/setup failures before checks: minimal artifact, never fake check rows.
-        if checks is None:
+        hard = str(exc)
+        if checks is None or hard in (
+                'expected_deployment_mismatch', 'expected_project_mismatch',
+                'merge_app_deployment_sha_mismatch'):
             return verification_result_finalize(artifact_dir, {
-                'status': str(exc),
+                'status': hard,
                 'readiness': 'error',
                 'hostname': hostname or (plan or {}).get('hostname'),
                 'project_id': (plan or {}).get('project_id'),
                 'app_deployment_sha': app_sha or (plan or {}).get('app_deployment_sha'),
                 'automation_source_sha': (plan or {}).get('automation_source_sha'),
-                'failure_reasons': [str(exc)],
+                'failure_reasons': [hard],
+                'checks': checks,
             })
         for key, value in list(checks.items()):
             if value == 'pending':
                 # Leave untouched pending unless the failure maps to a known check.
                 pass
-        if str(exc) == 'verification_transport':
+        if hard == 'verification_transport':
             if checks.get('http_home') == 'pending':
                 checks['http_home'] = 'failed'
             if checks.get('http_health') == 'pending':
                 checks['http_health'] = 'failed'
-        failures.append(str(exc))
+        failures.append(hard)
         return verification_result_finalize(artifact_dir, {
             'status': 'verification_incomplete',
             'readiness': 'incomplete',
@@ -1711,16 +1936,35 @@ def verify_domain(source, binary, artifact_dir):
         })
 
 
-def run(source, binary, operation, approved_digest, artifact_dir):
+def run(source, binary, operation, approved_digest, artifact_dir,
+        authorization_mode=AUTH_MODE_MANUAL,
+        expected_project_id=None, expected_deployment_id=None):
     artifact_dir = str(Path(artifact_dir).resolve())
+    if authorization_mode not in (AUTH_MODE_MANUAL, AUTH_MODE_MERGE):
+        emit(status='authorization_mode_invalid')
+        return 1
     try:
         if operation == 'plan':
-            code, _plan = build_plan(source, binary, artifact_dir)
+            code, _plan = build_plan(
+                source, binary, artifact_dir, authorization_mode,
+                expected_project_id=expected_project_id,
+                expected_deployment_id=expected_deployment_id)
             return code
         if operation == 'apply':
-            return apply_plan(source, binary, artifact_dir, approved_digest)
+            if authorization_mode == AUTH_MODE_MERGE:
+                return apply_merge_policy(
+                    source, binary, artifact_dir,
+                    expected_project_id=expected_project_id,
+                    expected_deployment_id=expected_deployment_id)
+            return apply_plan(
+                source, binary, artifact_dir, approved_digest, authorization_mode,
+                expected_project_id=expected_project_id,
+                expected_deployment_id=expected_deployment_id)
         if operation == 'verify':
-            return verify_domain(source, binary, artifact_dir)
+            return verify_domain(
+                source, binary, artifact_dir, authorization_mode,
+                expected_project_id=expected_project_id,
+                expected_deployment_id=expected_deployment_id)
         raise Failure('operation_invalid')
     except Failure as exc:
         emit(status=str(exc))
@@ -1734,10 +1978,21 @@ def main():
     parser.add_argument('--operation', choices=('plan', 'apply', 'verify'), required=True)
     parser.add_argument('--approved-plan-digest', default='')
     parser.add_argument('--artifact-dir', default='.')
+    parser.add_argument(
+        '--authorization-mode',
+        choices=(AUTH_MODE_MANUAL, AUTH_MODE_MERGE),
+        default=AUTH_MODE_MANUAL,
+    )
+    parser.add_argument('--expected-project-id', default='')
+    parser.add_argument('--expected-deployment-id', default='')
     args = parser.parse_args()
     try:
-        return run(Path(args.source).resolve(), args.vercel_bin, args.operation,
-                   (args.approved_plan_digest or '').strip(), args.artifact_dir)
+        return run(
+            Path(args.source).resolve(), args.vercel_bin, args.operation,
+            (args.approved_plan_digest or '').strip(), args.artifact_dir,
+            args.authorization_mode,
+            expected_project_id=(args.expected_project_id or '').strip() or None,
+            expected_deployment_id=(args.expected_deployment_id or '').strip() or None)
     except Exception:
         emit(status='unexpected_failure')
         return 1

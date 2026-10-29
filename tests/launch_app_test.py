@@ -147,11 +147,11 @@ class LaunchTests(unittest.TestCase):
                 self.assertEqual(self.run_app(),0)
                 self.assertEqual(self.state()['calls'],[])
             os.environ[key] = original
-    def test_push_never_creates_and_verify_never_creates(self):
+    def test_push_without_merge_policy_rejected_and_verify_never_creates(self):
         with self.assertRaisesRegex(app.Failure,'manual_creation_required'):
             self.run_app(operation='verify')
         os.environ['GITHUB_EVENT_NAME']='push'
-        with self.assertRaisesRegex(app.Failure,'manual_creation_required'): self.run_app()
+        with self.assertRaisesRegex(app.Failure,'event_not_authorized'): self.run_app()
         self.assertEqual(self.state()['calls'],[])
     def test_marker_conflict_and_exact_recovery(self):
         s=self.state(); s['project']={'id':'prj_Offline','name':'example-app','accountId':'team_Offline'}; self.save(s)

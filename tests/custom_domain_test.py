@@ -378,14 +378,19 @@ class CustomDomainTests(unittest.TestCase):
         self.assertIn('--approved-plan-digest "$APPROVED_PLAN_DIGEST"', wf)
         launch = (ROOT / '.github/workflows/launch-app.yml').read_text()
         self.assertIn('app-provider-${{ github.repository_id }}', launch)
+        self.assertNotRegex(launch.split('jobs:', 1)[0], r'(?m)^\s+push:\s*$')
         self.assertNotIn('alfonsograna.com', wf)
         self.assertIn("github.repository_id != '1051601680'", wf)
+        merge = (ROOT / '.github/workflows/merge-onboarding.yml').read_text()
+        self.assertIn('app-provider-${{ github.repository_id }}', merge)
+        self.assertIn('onboarding.config.json', (ROOT / 'docs/custom-domain.md').read_text())
         docs = (ROOT / 'docs/custom-domain.md').read_text()
         self.assertIn('app.example.com', docs)
         self.assertNotRegex(docs, r'agrana|alfonsograna\.com')
         self.assertIn('team_…', docs)
         self.assertIn('build_plan()', docs)
         self.assertIn('selected team', docs.lower())
+        self.assertIn('auto_apply', docs)
 
     def test_setup_required_no_provider_writes(self):
         for key in ('VERCEL_API_TOKEN', 'CLOUDFLARE_API_TOKEN', 'APP_HOSTNAME'):

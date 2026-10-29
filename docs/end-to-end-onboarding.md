@@ -17,25 +17,25 @@ A green build, a Vercel URL, public Supabase configuration discovery or a test a
 ## Operator path
 
 1. Generate an independent repository through GitHub's **Use this template**.
-2. Configure GitHub Secrets for Vercel, Cloudflare and the approved database/runtime/migration identities. Configure the intended `APP_HOSTNAME`, `CLOUDFLARE_ZONE_NAME` and app-owned database namespace. Confirm the target account, zone and database before provisioning an app project.
-3. Run quality checks through **App Quality (APP-006)**. Actions installs the runner dependencies and runs disposable PostgreSQL isolation tests with synthetic fixtures.
+2. Configure GitHub Secrets for Vercel, Cloudflare and the approved database/runtime/migration identities (the live database target comes from those Supabase Secrets, not from an `onboarding.config.json` database field). Merge a prepared `onboarding.config.json` with the intended hostname, Cloudflare zone and `auto_apply` policy. Confirm the target account, zone and database before provisioning an app project. App-owned schema/namespace, migrations, grants and RLS remain mandatory readiness requirements; live orchestration for them is still missing.
+3. **App Quality (APP-006)** runs on the default-branch head. Actions installs the runner dependencies and runs disposable PostgreSQL isolation tests with synthetic fixtures. **Merge onboarding** gates provider writes on that successful current-head quality run.
 4. Run the required live database stage: verify the connection and ownership, review the app-scoped migration plan, apply the approved migrations, then check grants, RLS and the migration ledger. The required production orchestration for this stage is currently missing; the existing disabled workflow is an onboarding blocker.
-5. Deploy through **Launch app** and complete hostname attachment and DNS through **Custom domain** (`plan`, approved `apply`, `verify`). These are separate implementation components of the same required onboarding process.
+5. **Merge onboarding** deploys the shell and applies hostname/DNS under the merge-reviewed policy. Maintainer **Launch app** / **Custom domain** digest workflows remain available. Shell+DNS success is reported separately from missing database stages and never as full-app-ready.
 6. Verify the deployed application at its intended hostname, including its database operation and isolation behavior. Record the exact revision, migration versions and check results.
 
-All operator actions, including approval gates, belong in GitHub settings, pull requests, environments and Actions. Local Node, Python, Podman, PostgreSQL and Terraform installations are optional maintainer tools, described in [maintainer verification](maintainer-verification.md).
+Operator routine actions are Secrets setup and merge-request approval. Digest copy/paste and Run workflow clicks are maintainer interfaces, not the required path. Local Node, Python, Podman, PostgreSQL and Terraform installations are optional maintainer tools, described in [maintainer verification](maintainer-verification.md).
 
 ## Current implementation and gaps
 
 | Stage | Current evidence and implementation | Remaining requirement |
 | --- | --- | --- |
-| Hostname and database intake | Repository variables and public Supabase configuration are available | The shell launcher still accepts four shell-stage secrets without enforcing the full hostname/database onboarding preflight before project creation |
-| Quality CI | `app-quality.yml` installs Podman on the runner and tests against disposable PostgreSQL | These tests remain fixture evidence, separate from the approved Supabase target |
-| Shell deployment | `launch-app.yml` deploys the repository-owned Vercel project and checks page/health revision | Its success is an intermediate result |
-| Hostname and DNS | `custom-domain.yml` provides scoped plan/apply/verify | Run and verify it for each actual application hostname |
+| Hostname and database intake | Tracked `onboarding.config.json` carries hostname/zone/`auto_apply`; approved database target and public Supabase configuration via Secrets | Database connection/migration/RLS orchestration still lacks a live workflow before claiming full onboarding |
+| Quality CI | `app-quality.yml` installs Podman on the runner and tests against disposable PostgreSQL; merge onboarding waits for current-head success | These tests remain fixture evidence, separate from the approved Supabase target |
+| Shell deployment | `merge-onboarding.yml` deploys under merge policy; `launch-app.yml` remains maintainer dispatch | Shell success is an intermediate result |
+| Hostname and DNS | Merge onboarding applies/verifies configured hostname; `custom-domain.yml` remains digest-based maintainer path | Confirm verify evidence per application hostname |
 | App-scoped schema migrations | `scripts/migrate_app_namespace.py` provides a scoped harness; `.github/workflows/deploy.yml` explicitly disables live migrations | Implement and review the protected Actions connection, bootstrap and migration orchestration before claiming full onboarding |
 | Live database and isolation verification | Shell health and public configuration checks do not exercise application tables | Add protected Actions checks against the deployed application and approved database using real runtime identities |
-| Combined readiness | Individual workflow results exist | Enforce all required stages in the end-to-end workflow and completion report |
+| Combined readiness | Merge onboarding reports infrastructure/DNS separately from mandatory DB incompleteness | Do not treat green shell+DNS as full-app-ready |
 
 This document defines the required contract and records the missing implementation. It does not enable the disabled migration workflow or claim the full path already runs.
 

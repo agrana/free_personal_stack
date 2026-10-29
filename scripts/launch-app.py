@@ -4,6 +4,10 @@
 An interrupted create without a marker fails closed. Review its emitted project ID,
 then manually dispatch with expected_project_id and confirm_repository_id to adopt
 that exact unmarked project. A conflicting marker can never be overridden.
+
+Default-branch push is authorized only under a merge-reviewed onboarding.config.json
+with auto_apply=true and a required hostname (ONBOARDING_MERGE_POLICY=1 from the
+merge-onboarding orchestrator). Manual workflow_dispatch remains the maintainer path.
 """
 import argparse
 import hashlib
@@ -102,6 +106,23 @@ def cli(binary, source, team, *args, value=None, structured=True):
     except ValueError:
         raise Failure('cli_json_invalid') from None
 
+def merge_policy_context(source, sha):
+    """Push mutations require merge-reviewed auto_apply policy + hostname."""
+    if os.environ.get('ONBOARDING_MERGE_POLICY') != '1':
+        raise Failure('event_not_authorized')
+    cfg = load('onboarding-config')
+    try:
+        config = cfg.load_onboarding_config(
+            source, require_tracked_clean=True, expected_sha=sha)
+    except cfg.ConfigError as exc:
+        raise Failure(str(exc)) from None
+    if not config['auto_apply']:
+        raise Failure('onboarding_auto_apply_disabled')
+    if not config['hostname'] or not config['cloudflare_zone_name']:
+        raise Failure('hostname_required_before_provisioning')
+    return config
+
+
 def context(source):
     repo = os.environ.get('GITHUB_REPOSITORY', '')
     rid = os.environ.get('GITHUB_REPOSITORY_ID', '')
@@ -122,15 +143,21 @@ def context(source):
     branch = metadata.get('default_branch')
     if not isinstance(branch, str) or not branch:
         raise Failure('default_branch_invalid')
-    if (os.environ.get('GITHUB_EVENT_NAME') not in ('workflow_dispatch', 'push')
-            or os.environ.get('GITHUB_REF') != 'refs/heads/' + branch):
+    event = os.environ.get('GITHUB_EVENT_NAME')
+    if event == 'workflow_dispatch':
+        policy = None
+    elif event == 'push':
+        policy = merge_policy_context(source, sha)
+    else:
+        raise Failure('event_not_authorized')
+    if os.environ.get('GITHUB_REF') != 'refs/heads/' + branch:
         raise Failure('event_not_authorized')
     remote = github('/repos/' + repo + '/commits/' + urllib.parse.quote(branch, safe=''))
     if remote.get('sha') != sha or command(['git', 'rev-parse', 'HEAD'], source) != sha:
         raise Failure('source_sha_mismatch')
     if command(['git', 'status', '--porcelain', '--untracked-files=all'], source):
         raise Failure('source_dirty')
-    return rid, slug, sha
+    return rid, slug, sha, policy
 
 def get_page(url):
     try:
@@ -170,7 +197,7 @@ def run(source, binary, operation='deploy', expected_project=None, confirm_repos
            'SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE' for k in REQUIRED):
         emit(status='setup_required', required_secret_names=list(REQUIRED))
         return 0
-    rid, name, sha = context(source)
+    rid, name, sha, policy = context(source)
     marker_key = MARKER + rid
     public_config = {key: os.environ[key] for key in ('SUPABASE_URL', 'SUPABASE_ANON_KEY')}
     team = identifier(os.environ['VERCEL_TEAM_ID'], 'team_')
@@ -218,9 +245,16 @@ def run(source, binary, operation='deploy', expected_project=None, confirm_repos
     if len(matches) > 1:
         raise Failure('project_collision')
     manual = os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch'
+    merge_auto = policy is not None and policy.get('auto_apply') is True
+    if expected_project is None and merge_auto and policy.get('expected_project_id'):
+        expected_project = policy['expected_project_id']
+        confirm_repository = policy['confirm_repository_id']
     if expected_project:
         identifier(expected_project, 'prj_')
-        if not manual or operation != 'deploy' or confirm_repository != rid:
+        # Recovery: manual dispatch, or merge-policy push with exact config pair.
+        if operation != 'deploy' or confirm_repository != rid:
+            raise Failure('recovery_not_authorized')
+        if not manual and not merge_auto:
             raise Failure('recovery_not_authorized')
         if len(matches) != 1 or matches[0].get('id') != expected_project:
             raise Failure('expected_project_mismatch')
@@ -231,8 +265,13 @@ def run(source, binary, operation='deploy', expected_project=None, confirm_repos
     digest = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
     emit(status='plan', digest=digest, **plan)
     if not matches:
-        if not manual or operation != 'deploy':
+        # First create: manual dispatch, or merge-policy push with required hostname.
+        if operation != 'deploy':
             raise Failure('manual_creation_required')
+        if not manual and not merge_auto:
+            raise Failure('manual_creation_required')
+        if merge_auto and not (policy and policy.get('hostname')):
+            raise Failure('hostname_required_before_provisioning')
         # Revalidate source and GitHub identity before the first write.
         context(source)
         # project create swallows HTTP 409 in CLI 65.4; api preserves failure.

@@ -2,10 +2,10 @@
 
 ## Human quickstart (zero local setup)
 
-Use GitHub settings and Actions for the [required end-to-end onboarding path](end-to-end-onboarding.md). Confirm the hostname, authoritative zone and database target before provisioning an application project. Database connection, app-scoped schema migrations, grants and RLS verification are required stages. Their live Actions orchestration is still an implementation gap. The current steps below deploy the intermediate shell and configure its hostname.
+Use GitHub settings and Actions for the [required end-to-end onboarding path](end-to-end-onboarding.md). Confirm the hostname and authoritative zone in tracked `onboarding.config.json`, and the approved database target via repository Supabase Secrets, before provisioning an application project. Database connection, app-scoped schema migrations, grants and RLS verification are required stages. Their live Actions orchestration is still an implementation gap. The current steps below deploy the intermediate shell and configure its hostname.
 
 1. GitHub **Use this template** → create an independent repository (not a fork). Use a lowercase slug such as `my-application` (letters, digits, single hyphens; start with a letter). Leave **Template repository** off on the new repo.
-2. In that repository: **Settings → Secrets and variables → Actions** → add these four shell-stage repository secrets:
+2. In that repository: **Settings → Secrets and variables → Actions** → add shell + Cloudflare secrets:
 
    | Secret | Value |
    | --- | --- |
@@ -13,13 +13,14 @@ Use GitHub settings and Actions for the [required end-to-end onboarding path](en
    | `VERCEL_TEAM_ID` | That team's public ID (`team_…`) |
    | `SUPABASE_URL` | Existing Supabase project HTTPS URL |
    | `SUPABASE_ANON_KEY` | Modern `sb_publishable_…` key (legacy anon JWT also accepted) |
+   | `CLOUDFLARE_API_TOKEN` | Zone Read + DNS Edit for the intended zone |
 
-3. **Actions → Launch app → Run workflow** on the default branch. Operation `deploy`. Leave recovery inputs empty on the first run.
-4. Read the summary status (`page_and_health_verified`, `ready_but_verification_protected`, or `setup_required`). A green `setup_required` run is not launch success.
+3. Review/merge a prepared PR setting `onboarding.config.json` hostname, zone, and `auto_apply: true`. That merge authorizes automatic apply.
+4. Default-branch push runs **Merge onboarding** after App Quality. Read summary (`infrastructure_dns_verified_database_incomplete`, `setup_required`, `onboarding_auto_apply_disabled`, or failure). Green shell+DNS is not full-app-ready while database/migration/RLS orchestration remains unimplemented.
 
-5. Complete the required [hostname and DNS stage](custom-domain.md): add secret `CLOUDFLARE_API_TOKEN`, set variables `APP_HOSTNAME` and `CLOUDFLARE_ZONE_NAME`, then run **Custom domain** (`plan`, approved `apply`, `verify`). Onboarding is complete only after DNS, HTTPS, the page and exact deployed-revision checks pass at the intended hostname, runtime database access works, schema migrations are applied, and grants and RLS isolation are verified.
+5. Maintainer [hostname and DNS](custom-domain.md) digest workflows remain available. Onboarding is complete only after DNS, HTTPS, the page and exact deployed-revision checks pass at the intended hostname, runtime database access works, schema migrations are applied, and grants and RLS isolation are verified.
 
-GitHub configuration and Actions provide this onboarding path. After editing secrets, manually run the relevant workflow. The four-secret shell deployment is an intermediate result. Details: [secrets-only-launch.md](secrets-only-launch.md).
+GitHub Secrets + merge-reviewed config provide the operator path. Details: [secrets-only-launch.md](secrets-only-launch.md).
 
 ### Optional secret-name placeholders
 
