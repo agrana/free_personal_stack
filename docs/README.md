@@ -37,6 +37,7 @@ CI/CD automation and GitHub Actions documentation:
 ### `/docs/`
 General documentation:
 - `end-to-end-onboarding.md` - Required GitHub-only hostname, database, migrations and live verification contract, with current implementation gaps
+- `database-onboarding.md` - Opt-in read-only managed-service catalog preflight (Secrets + merge); observed vs proven; remaining migration/RLS gates
 - `maintainer-verification.md` - Optional local reproduction of Actions quality checks; runner-managed Podman and disposable PostgreSQL
 - `new-app-runbook.md` - Human secrets-only launch plus maintainer local APP-008 rehearsal checklist
 - `secrets-only-launch.md` - Secrets + merge-reviewed onboarding config path (maintainer Launch app retained)

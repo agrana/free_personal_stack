@@ -15,6 +15,7 @@ Configure the intended hostname and authoritative zone in tracked `onboarding.co
    | `VERCEL_TEAM_ID`       | That team's public ID (`team_…`), stored as a secret to choose scope explicitly        |
    | `SUPABASE_URL`         | Existing Supabase project's HTTPS URL                                                  |
    | `SUPABASE_ANON_KEY`    | That project's modern `sb_publishable_…` key; a valid legacy anon key is also accepted |
+   | `SUPABASE_ACCESS_TOKEN` | Management API token with database read permission; required only when enabling database catalog preflight ([docs/database-onboarding.md](docs/database-onboarding.md)) |
    | `CLOUDFLARE_API_TOKEN` | Zone Read + DNS Edit for the intended Cloudflare zone                                  |
 
 3. Review and merge a prepared PR that sets `onboarding.config.json` hostname, `cloudflare_zone_name`, and `auto_apply: true` (template default is `false` with null host/zone). That merge is the apply authorization. You do not click Run workflow or paste digests for routine onboarding.
