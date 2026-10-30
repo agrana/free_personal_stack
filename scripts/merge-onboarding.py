@@ -19,6 +19,7 @@ failed or pending run.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -370,6 +371,13 @@ def parse_json_events(stdout):
     return lines
 
 
+def enrollment_team_binding(team_id):
+    """Fingerprint a validated, non-credential provider team identifier."""
+    if not isinstance(team_id, str) or not re.fullmatch(r'team_[A-Za-z0-9]+', team_id):
+        return None
+    return hashlib.sha256(team_id.encode('utf-8')).hexdigest()
+
+
 def persist_stage_capture(artifact_dir, name, *, returncode, events, stdout, stderr,
                           timed_out=False, timeout_sec=None, stage=None):
     payload = {
@@ -431,9 +439,21 @@ def run_python_script(script, source, binary, extra_args, env_updates, artifact_
         returncode = None
     except OSError:
         raise Failure('stage_command_transport') from None
+    # Binding is operational data; report redaction must not change its meaning.
+    # Always overwrite a child-supplied fingerprint using the captured team ID.
+    enrollment_bindings = [
+        enrollment_team_binding(event.get('team_id'))
+        if event.get('status') == 'project_enrolled' else None
+        for event in parse_json_events(stdout)
+    ]
     stdout = sanitize_captured(stdout, env)
     stderr = sanitize_captured(stderr, env)
     lines = parse_json_events(stdout)
+    if len(lines) != len(enrollment_bindings):
+        raise Failure('stage_event_redaction_mismatch')
+    for event, binding in zip(lines, enrollment_bindings):
+        if event.get('status') == 'project_enrolled':
+            event['enrollment_team_binding_sha256'] = binding
     if capture_name:
         persist_stage_capture(
             artifact_dir, capture_name, returncode=returncode, events=lines,
@@ -470,7 +490,13 @@ def extract_enroll_binding(lines, expected_sha, expected_repository_id, expected
             raise Failure('enroll_source_sha_mismatch')
         if repository_id != expected_repository_id:
             raise Failure('enroll_repository_mismatch')
-        if team_id != expected_team_id:
+        binding = event.get('enrollment_team_binding_sha256')
+        expected_binding = enrollment_team_binding(expected_team_id)
+        if binding is not None:
+            if (not expected_binding or binding != expected_binding
+                    or team_id not in (expected_team_id, '[redacted]')):
+                raise Failure('enroll_team_mismatch')
+        elif team_id != expected_team_id:
             raise Failure('enroll_team_mismatch')
         return project_id, repository_id, team_id, source_sha
     raise Failure('enroll_binding_missing')

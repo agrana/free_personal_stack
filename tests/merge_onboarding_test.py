@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -57,6 +58,47 @@ def git_commit(source: Path, message: str = 'config'):
          'commit', '-qm', message],
         cwd=source, check=True)
     return subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip()
+
+
+class EnrollmentRedactionBindingTests(unittest.TestCase):
+    def capture(self, *, mismatched=False):
+        team = 'team_RedactionFixture'
+        expected_digest = hashlib.sha256(team.encode()).hexdigest()
+        event = {
+            'status': 'project_enrolled', 'project_id': 'prj_Offline',
+            'repository_id': '1234', 'source_sha': 'a' * 40,
+            'team_id': 'team_Other' if mismatched else team,
+            # A subprocess cannot provide its own authoritative binding.
+            'enrollment_team_binding_sha256': expected_digest,
+        }
+        output = subprocess.CompletedProcess([], 0, json.dumps(event) + '\n', '')
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ, {'VERCEL_TEAM_ID': team}, clear=True
+        ), patch.object(orch.subprocess, 'run', return_value=output):
+            code, events, stdout, stderr = orch.run_python_script(
+                'launch-app.py', ROOT, 'unused', [], {}, tmp,
+                capture_name='enrollment.json',
+            )
+            artifact = (Path(tmp) / 'enrollment.json').read_text()
+        self.assertEqual(code, 0)
+        if not mismatched:
+            self.assertNotIn(team, artifact + stdout + stderr + json.dumps(events))
+        return team, events
+
+    def test_real_capture_keeps_team_binding_after_redaction(self):
+        team, events = self.capture()
+        binding = orch.extract_enroll_binding(events, 'a' * 40, '1234', team)
+        self.assertEqual(binding[0], 'prj_Offline')
+        self.assertEqual(binding[2], '[redacted]')
+        self.assertEqual(
+            events[0]['enrollment_team_binding_sha256'],
+            hashlib.sha256(team.encode()).hexdigest(),
+        )
+
+    def test_wrong_team_cannot_supply_its_own_matching_fingerprint(self):
+        team, events = self.capture(mismatched=True)
+        with self.assertRaisesRegex(orch.Failure, 'enroll_team_mismatch'):
+            orch.extract_enroll_binding(events, 'a' * 40, '1234', team)
 
 
 class OnboardingConfigTests(unittest.TestCase):
