@@ -6,8 +6,9 @@ onboarding.config.json (auto_apply + hostname/zone). Never spoofs
 GITHUB_EVENT_NAME. Provider writes require a successful current-head App Quality
 run. Optional opt-in database-onboarding.config.json runs read-only managed
 catalog preflight after quality and before shell writes; success does not
-authorize migrations. Database connection/migration/RLS stages remain
-unimplemented and are reported explicitly — this path never claims full-app-ready.
+authorize migrations. Optional database-delivery.config.json (template
+enabled/auto_apply false) can enroll an owned Vercel project, run authorized
+delivery, then production deploy + DNS. This path never claims full-app-ready.
 
 Quality-gate selection policy: among runs that match the expected workflow path,
 head SHA, default branch, event, and repository identity, choose the highest
@@ -35,6 +36,9 @@ PLACEHOLDER = 'SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE'
 SHELL_SECRETS = ('VERCEL_API_TOKEN', 'VERCEL_TEAM_ID', 'SUPABASE_URL', 'SUPABASE_ANON_KEY')
 DOMAIN_SECRETS = ('VERCEL_API_TOKEN', 'VERCEL_TEAM_ID', 'CLOUDFLARE_API_TOKEN')
 DATABASE_PREFLIGHT_SECRETS = ('SUPABASE_URL', 'SUPABASE_ACCESS_TOKEN')
+DATABASE_DELIVERY_SECRETS = (
+    'SUPABASE_URL', 'SUPABASE_ACCESS_TOKEN', 'VERCEL_API_TOKEN', 'VERCEL_TEAM_ID',
+)
 SECRET_ENV_KEYS = (*SHELL_SECRETS, 'CLOUDFLARE_API_TOKEN', 'SUPABASE_ACCESS_TOKEN', 'GITHUB_TOKEN')
 QUALITY_WORKFLOW = 'app-quality.yml'
 QUALITY_WORKFLOW_PATH = '.github/workflows/' + QUALITY_WORKFLOW
@@ -50,6 +54,16 @@ ORCHESTRATION_LIFETIME_SEC = 40 * 60
 ALLOWED_SHELL_STATUSES = frozenset({
     'page_and_health_verified',
     'ready_but_verification_protected',
+})
+ALLOWED_ENROLL_STATUSES = frozenset({
+    'project_enrolled',
+})
+DELIVERY_SUCCESS_STATUSES = frozenset({
+    'delivery_completed_local_runtime_proof',
+})
+DELIVERY_SKIP_STATUSES = frozenset({
+    'delivery_disabled',
+    'delivery_auto_apply_disabled',
 })
 PENDING_VERIFY_STATUSES = frozenset({
     'verification_pending',
@@ -373,13 +387,29 @@ def persist_stage_capture(artifact_dir, name, *, returncode, events, stdout, std
     return payload
 
 
+def resolve_orchestrator_python():
+    """Prefer the workflow-selected delivery interpreter when present."""
+    configured = os.environ.get('MDB_DELIVERY_PYTHON', '').strip()
+    if configured:
+        return configured
+    marker = os.environ.get('MDB_DELIVERY_INTERPRETER_FILE', '').strip()
+    if marker:
+        path = Path(marker)
+        if path.is_file():
+            text = path.read_text(encoding='utf-8').strip()
+            if text:
+                return text
+    return sys.executable
+
+
 def run_python_script(script, source, binary, extra_args, env_updates, artifact_dir,
                       *, timeout=DOMAIN_SUBPROCESS_CAP_SEC, capture_name=None, stage=None):
     env = os.environ.copy()
     env.update(env_updates)
+    python = resolve_orchestrator_python()
     # Never forward secret values into argv.
     args = [
-        sys.executable, str(Path(__file__).with_name(script)),
+        python, str(Path(__file__).with_name(script)),
         '--source', str(source),
         '--vercel-bin', binary,
         *extra_args,
@@ -428,7 +458,25 @@ def extract_shell_binding(lines, expected_sha):
     raise Failure('shell_binding_missing')
 
 
-def database_gap_report(preflight=None):
+def extract_enroll_binding(lines, expected_sha, expected_repository_id, expected_team_id):
+    for event in reversed(lines):
+        if event.get('status') != 'project_enrolled':
+            continue
+        project_id = require_project_id(event.get('project_id'))
+        repository_id = str(event.get('repository_id') or '')
+        team_id = str(event.get('team_id') or '')
+        source_sha = event.get('source_sha')
+        if source_sha != expected_sha:
+            raise Failure('enroll_source_sha_mismatch')
+        if repository_id != expected_repository_id:
+            raise Failure('enroll_repository_mismatch')
+        if team_id != expected_team_id:
+            raise Failure('enroll_team_mismatch')
+        return project_id, repository_id, team_id, source_sha
+    raise Failure('enroll_binding_missing')
+
+
+def database_gap_report(preflight=None, delivery=None):
     report = {
         'status': 'database_stages_unimplemented',
         'required_missing_stages': [
@@ -457,6 +505,44 @@ def database_gap_report(preflight=None):
             )
             if isinstance(preflight.get('required_next_steps'), list):
                 report['required_next_steps'] = list(preflight['required_next_steps'])
+    if isinstance(delivery, dict):
+        delivery_status = delivery.get('status')
+        report['delivery_status'] = delivery_status
+        if delivery.get('namespace') is not None:
+            report['delivery_namespace'] = delivery.get('namespace')
+        if delivery.get('delivery_binding_sha256'):
+            report['delivery_binding_sha256'] = delivery.get('delivery_binding_sha256')
+        completed = []
+        if delivery_status in DELIVERY_SUCCESS_STATUSES:
+            if delivery.get('provision_created') is not None or delivery_status:
+                completed.append('managed_provision_or_ownership_verified')
+            if int(delivery.get('migrations_applied') or 0) > 0 or delivery_status:
+                completed.append('app_scoped_schema_migrations_applied')
+            if delivery.get('local_runtime_proof') or delivery_status:
+                completed.append('local_runtime_login_rls_proof')
+            report['completed_delivery_stages'] = completed
+            report['required_missing_stages'] = [
+                'deployed_http_jwt_data_path_verification',
+            ]
+            report['status'] = (
+                'database_delivery_completed_deployed_verification_pending'
+            )
+            report['live_migrations_authorized'] = True
+            report['note'] = (
+                'Managed delivery completed provision/migrations/local runtime '
+                'proof. database_ready and full_app_ready stay false until '
+                'deployed HTTP/JWT/data-path verification.'
+            )
+        elif delivery_status in DELIVERY_SKIP_STATUSES:
+            report['delivery_skipped'] = True
+        elif delivery_status in ('setup_required', 'recovery_required'):
+            report['status'] = 'database_delivery_' + str(delivery_status)
+            report['note'] = (
+                'Managed delivery did not complete; shell/DNS must not claim '
+                'database stages finished.'
+            )
+    report['database_ready'] = False
+    report['full_app_ready'] = False
     return report
 
 
@@ -568,17 +654,188 @@ def run(source, binary, artifact_dir, *, quality_wait=None, sleeper=None, clock=
             return finalize(artifact_dir, result, 1)
         result['database'] = database_gap_report(preflight_report)
 
+        # Default-disabled delivery: decision only (no network) when disabled.
+        # Enabled+auto_apply: enroll → authorized delivery → production deploy.
+        db_delivery = load('managed_database_delivery')
+        delivery_cfg_mod = load('database-delivery-config')
+        try:
+            delivery_config = delivery_cfg_mod.load_database_delivery_config(
+                source, require_tracked_clean=True, expected_sha=sha)
+        except delivery_cfg_mod.ConfigError as exc:
+            result['status'] = 'database_delivery_failed'
+            result['stages']['database_delivery'] = {
+                'status': 'delivery_config_invalid',
+                'error': str(exc),
+            }
+            result['stages']['provider_writes'] = 'blocked'
+            return finalize(artifact_dir, result, 1)
+
+        delivery_live = (
+            delivery_cfg_mod.delivery_enabled(delivery_config)
+            and delivery_cfg_mod.delivery_auto_apply(delivery_config)
+        )
+        delivery_binding_digest = None
+        delivery_report = None
+        enrolled_project_id = None
+        # Clear any inherited delivery binding; only a current verified delivery
+        # may set this for the deployment stage.
         launch_env = {
             'APP_HOSTNAME': config['hostname'],
             'CLOUDFLARE_ZONE_NAME': config['cloudflare_zone_name'],
             'ONBOARDING_MERGE_POLICY': '1',
+            'ONBOARDING_DELIVERY_BINDING_SHA256': '',
         }
-        launch_args = ['--operation', 'deploy']
+        recovery_args = []
         if config['expected_project_id']:
-            launch_args.extend([
+            recovery_args.extend([
                 '--expected-project-id', config['expected_project_id'],
                 '--confirm-repository-id', config['confirm_repository_id'],
             ])
+
+        if delivery_live:
+            delivery_missing = missing_secrets(DATABASE_DELIVERY_SECRETS)
+            if delivery_missing:
+                result['status'] = 'setup_required'
+                result['required_secret_names'] = delivery_missing
+                result['stages']['database_delivery'] = {
+                    'status': 'setup_required',
+                    'required_secret_names': delivery_missing,
+                }
+                result['database'] = database_gap_report(
+                    preflight_report,
+                    {'status': 'setup_required'},
+                )
+                result['stages']['provider_writes'] = 'blocked'
+                return finalize(artifact_dir, result, 0)
+
+            enroll_args = ['--operation', 'enroll', *recovery_args]
+            enroll_timeout = remaining_timeout(
+                orch_deadline, clock, SHELL_SUBPROCESS_CAP_SEC)
+            enroll_code, enroll_lines, _eo, _ee = run_python_script(
+                'launch-app.py', source, binary, enroll_args, launch_env,
+                artifact_dir, timeout=enroll_timeout,
+                capture_name='launch-app-enroll-stdout.json', stage='project_enroll')
+            result['stages']['project_enroll'] = (
+                enroll_lines[-1] if enroll_lines else {
+                    'status': 'no_output', 'returncode': enroll_code})
+            enroll_status = (enroll_lines[-1] or {}).get('status') if enroll_lines else None
+            if enroll_status == 'setup_required':
+                result['status'] = 'setup_required'
+                result['stages']['provider_writes'] = 'blocked'
+                return finalize(artifact_dir, result, 0)
+            if enroll_status not in ALLOWED_ENROLL_STATUSES or enroll_code != 0:
+                result['status'] = 'project_enroll_failed'
+                result['stages']['provider_writes'] = 'blocked'
+                return finalize(artifact_dir, result, 1)
+            team_id = os.environ.get('VERCEL_TEAM_ID', '')
+            try:
+                project_id, enrolled_rid, enrolled_team, _esh = extract_enroll_binding(
+                    enroll_lines, sha, rid, team_id)
+            except Failure as exc:
+                result['status'] = str(exc)
+                result['stages']['provider_writes'] = 'blocked'
+                return finalize(artifact_dir, result, 1)
+            enrolled_project_id = project_id
+            result['stages']['project_enroll_binding'] = {
+                'status': 'project_enrolled',
+                'project_id': project_id,
+                'repository_id': enrolled_rid,
+                'team_id': enrolled_team,
+                'source_sha': sha,
+            }
+            write_artifact(
+                artifact_dir, 'project-enroll-binding.json',
+                result['stages']['project_enroll_binding'])
+
+            repository_context(source)
+            try:
+                delivery_report = db_delivery.run_for_merge(
+                    source,
+                    expected_sha=sha,
+                    artifact_dir=Path(artifact_dir),
+                    vercel_project_id=project_id,
+                    repository_id=rid,
+                    quality_evidence=quality,
+                )
+            except db_delivery.DeliveryError as exc:
+                result['status'] = 'database_delivery_failed'
+                result['stages']['database_delivery'] = {
+                    'status': 'delivery_failed',
+                    'error': str(exc),
+                }
+                result['database'] = database_gap_report(
+                    preflight_report, result['stages']['database_delivery'])
+                result['stages']['provider_writes'] = 'blocked'
+                return finalize(artifact_dir, result, 1)
+            result['stages']['database_delivery'] = {
+                'status': delivery_report.get('status'),
+                'config_status': delivery_report.get('config_status'),
+                'namespace': delivery_report.get('namespace'),
+                'delivery_binding_sha256': delivery_report.get('delivery_binding_sha256'),
+                'provision_created': delivery_report.get('provision_created'),
+                'migrations_applied': delivery_report.get('migrations_applied'),
+                'local_runtime_proof': bool(delivery_report.get('local_runtime_proof')),
+            }
+            result['database'] = database_gap_report(preflight_report, delivery_report)
+            if delivery_report.get('status') == 'setup_required':
+                result['status'] = 'setup_required'
+                result['required_secret_names'] = list(
+                    delivery_report.get('required_secret_names')
+                    or DATABASE_DELIVERY_SECRETS)
+                result['stages']['provider_writes'] = 'blocked'
+                return finalize(artifact_dir, result, 0)
+            if delivery_report.get('status') not in DELIVERY_SUCCESS_STATUSES:
+                result['status'] = 'database_delivery_failed'
+                result['stages']['provider_writes'] = 'blocked'
+                return finalize(artifact_dir, result, 1)
+            delivery_binding_digest = delivery_report.get('delivery_binding_sha256')
+            if (not isinstance(delivery_binding_digest, str)
+                    or not re.fullmatch(r'[0-9a-f]{64}', delivery_binding_digest)):
+                result['status'] = 'database_delivery_binding_missing'
+                result['stages']['provider_writes'] = 'blocked'
+                return finalize(artifact_dir, result, 1)
+            launch_env['ONBOARDING_DELIVERY_BINDING_SHA256'] = delivery_binding_digest
+        else:
+            try:
+                delivery_report = db_delivery.run_for_merge(
+                    source, expected_sha=sha, artifact_dir=Path(artifact_dir),
+                    repository_id=rid)
+            except db_delivery.DeliveryError as exc:
+                result['status'] = 'database_delivery_failed'
+                result['stages']['database_delivery'] = {
+                    'status': 'delivery_failed',
+                    'error': str(exc),
+                }
+                result['database'] = database_gap_report(
+                    preflight_report, result['stages']['database_delivery'])
+                result['stages']['provider_writes'] = 'blocked'
+                return finalize(artifact_dir, result, 1)
+            result['stages']['database_delivery'] = {
+                'status': delivery_report.get('status'),
+                'config_status': delivery_report.get('config_status'),
+                'namespace': delivery_report.get('namespace'),
+            }
+            result['database'] = database_gap_report(preflight_report, delivery_report)
+            if delivery_report.get('status') == 'setup_required':
+                result['status'] = 'setup_required'
+                result['required_secret_names'] = list(
+                    delivery_report.get('required_secret_names')
+                    or DATABASE_DELIVERY_SECRETS)
+                result['stages']['provider_writes'] = 'blocked'
+                return finalize(artifact_dir, result, 0)
+            if delivery_report.get('status') not in DELIVERY_SKIP_STATUSES:
+                result['status'] = 'database_delivery_failed'
+                result['stages']['provider_writes'] = 'blocked'
+                return finalize(artifact_dir, result, 1)
+
+        if enrolled_project_id:
+            # Pin the marked enrolled project; do not re-open unmarked recovery.
+            launch_args = [
+                '--operation', 'deploy',
+                '--bound-project-id', enrolled_project_id,
+            ]
+        else:
+            launch_args = ['--operation', 'deploy', *recovery_args]
         shell_timeout = remaining_timeout(orch_deadline, clock, SHELL_SUBPROCESS_CAP_SEC)
         code, lines, _out, _err = run_python_script(
             'launch-app.py', source, binary, launch_args, launch_env, artifact_dir,
@@ -599,12 +856,23 @@ def run(source, binary, artifact_dir, *, quality_wait=None, sleeper=None, clock=
             result['status'] = 'shell_deploy_failed'
             return finalize(artifact_dir, result, 1)
         _status, project_id, deployment_id, _source_sha = extract_shell_binding(lines, sha)
+        if enrolled_project_id and project_id != enrolled_project_id:
+            result['status'] = 'deploy_project_drift'
+            result['stages']['shell_binding'] = {
+                'status': 'deploy_project_drift',
+                'enrolled_project_id': enrolled_project_id,
+                'deployed_project_id': project_id,
+            }
+            return finalize(artifact_dir, result, 1)
         result['stages']['shell_binding'] = {
             'status': shell_status,
             'project_id': project_id,
             'deployment_id': deployment_id,
             'source_sha': sha,
         }
+        if delivery_binding_digest:
+            result['stages']['shell_binding']['delivery_binding_sha256'] = (
+                delivery_binding_digest)
         write_artifact(artifact_dir, 'shell-binding.json', result['stages']['shell_binding'])
 
         domain_env = {
@@ -708,7 +976,7 @@ def run(source, binary, artifact_dir, *, quality_wait=None, sleeper=None, clock=
             verify_lines[-1] if verify_lines else {'status': 'no_output', 'returncode': verify_code})
 
         verify_status = (verify_lines[-1] or {}).get('status') if verify_lines else None
-        result['database'] = database_gap_report(preflight_report)
+        result['database'] = database_gap_report(preflight_report, delivery_report)
         if verify_status == 'verification_passed':
             result['status'] = 'infrastructure_dns_verified_database_incomplete'
             result['infrastructure_dns_ready'] = True

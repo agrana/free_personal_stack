@@ -81,11 +81,16 @@ bindings), plus unrelated preexisting objects under `fixtures/preexisting/`.
   unmarked schemas/roles, silently repairs drift, or modifies shared/other-app
   grants. Credential rotation is explicit and outside this slice.
 
-Bootstrap requires a NOSUPERUSER `CREATEROLE` login with `CREATE` on the target
-database. The library grants that provisioner only the memberships it needs on
-roles it creates, respecting PostgreSQL 17 `ADMIN`/`SET`/`INHERIT` rules. If
-`PUBLIC` still has `CREATE` on schema `public`, provisioning fails closed and
-does not alter shared grants.
+Bootstrap requires a NOSUPERUSER `CREATEROLE` identity with `CREATE` on the
+target database. Effective provisioner identity is `CURRENT_USER`. Direct
+logins must also be `NOBYPASSRLS`. Delegated CLI login may `SET ROLE` to a
+bound trusted root (optional `allow_trusted_bootstrap_bypassrls`) — after
+owner-schema grants the library restores that provisioner with `SET ROLE`
+(not `RESET ROLE`, which would return to the ephemeral `session_user`). The
+library grants that provisioner only the memberships it needs on roles it
+creates, respecting PostgreSQL 17 `ADMIN`/`SET`/`INHERIT` rules. If `PUBLIC`
+still has `CREATE` on schema `public`, provisioning fails closed and does not
+alter shared grants.
 
 ## Migration execution contract
 
@@ -177,10 +182,11 @@ a hard failure, not a skip. Existing APP-003 PostgreSQL 16 fixtures stay on
 
 ## Remaining integration gaps
 
-- Secure creation/persistence/delivery of provisioner, migrator, and runtime
-  credentials via GitHub Secrets (accepting passwords in library calls is not a
-  completed Secrets-only path)
-- Managed provider API / connection-pooler wiring and live workflow orchestration
+- Credential bootstrap / pooler / Vercel runtime custody library: see
+  [managed-database-delivery.md](managed-database-delivery.md). Template
+  delivery config stays disabled until a reviewed activation PR. Merge enroll →
+  delivery → deploy runs when enabled; deployed HTTP/JWT proof remains a
+  separate reviewed gate.
 - Deployed application readiness route and real JWT verification
 - Enabling/relaxing existing initializer and migration apply gates (explicitly
-  out of scope for this slice)
+  out of scope for the foundation and delivery library slices)

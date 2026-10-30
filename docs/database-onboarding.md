@@ -42,14 +42,15 @@ It runs as `supabase_read_only_user`. The client never falls back to the
 write-capable `/database/query` endpoint, never accepts arbitrary SQL/URLs, and
 never echoes raw provider bodies into reports.
 
-## Managed foundation core
+## Managed foundation and delivery
 
 The [managed database foundation](managed-database-foundation.md) provides
 app-specific data/control schemas, restricted roles, transactional migrations,
-and runtime RLS checks exercised against disposable PostgreSQL 17. Its library
-is separate from this read-only merge workflow. Secure credential delivery,
-managed-provider integration, and deployed runtime verification remain required
-before enabling live provisioning.
+and runtime RLS checks exercised against disposable PostgreSQL 17.
+[Managed database delivery](managed-database-delivery.md) adds existing-token
+CLI login / pooler / Vercel custody orchestration behind a default-disabled
+`database-delivery.config.json`. Deployed HTTP/JWT verification and live
+enrollment before production deploy remain separate reviewed gates.
 
 ## Remaining live gates
 
