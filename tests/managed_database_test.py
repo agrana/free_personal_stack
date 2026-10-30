@@ -490,8 +490,8 @@ class ManagedDatabaseIntegrationTests(unittest.TestCase):
             namespace="app_one",
             repository_id=APP_ONE_REPO,
             project_ref=APP_ONE_PROJECT,
-            migrator_password="should-not-apply-canary",
-            runtime_password="also-should-not-apply",
+            migrator_password=uuid.uuid4().hex,
+            runtime_password=uuid.uuid4().hex,
             provisioner_dsn=self.provisioner_url,
         )
         self.assertFalse(result.created)
@@ -577,8 +577,8 @@ class ManagedDatabaseIntegrationTests(unittest.TestCase):
                 namespace="app_delta",
                 repository_id="200001",
                 project_ref="proj-delta",
-                migrator_password="new-pw",
-                runtime_password="new-run",
+                migrator_password=uuid.uuid4().hex,
+                runtime_password=uuid.uuid4().hex,
                 provisioner_dsn=self.provisioner_url,
             )
         self.assertEqual(ctx.exception.code, self.mdb.FailureCode.ROLE_COLLISION)
@@ -587,8 +587,8 @@ class ManagedDatabaseIntegrationTests(unittest.TestCase):
                 namespace="app_orphan",
                 repository_id="200002",
                 project_ref="proj-orphan",
-                migrator_password="new-pw",
-                runtime_password="new-run",
+                migrator_password=uuid.uuid4().hex,
+                runtime_password=uuid.uuid4().hex,
                 provisioner_dsn=self.provisioner_url,
             )
         self.assertEqual(ctx2.exception.code, self.mdb.FailureCode.SCHEMA_COLLISION)
@@ -1262,8 +1262,8 @@ class ManagedDatabaseIntegrationTests(unittest.TestCase):
                 namespace=namespace,
                 repository_id=repo,
                 project_ref=project,
-                migrator_password="must-not-reset",
-                runtime_password="must-not-reset-either",
+                migrator_password=uuid.uuid4().hex,
+                runtime_password=uuid.uuid4().hex,
                 provisioner_dsn=self.provisioner_url,
             )
             self.assertFalse(repeat.created, namespace)
