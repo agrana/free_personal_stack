@@ -1096,6 +1096,326 @@ class OrchestratorShellAndTimeoutTests(unittest.TestCase):
         self.assertIn('not from an `onboarding.config.json` database field', e2e)
         self.assertIn('via Secrets', e2e)
 
+    def test_disabled_delivery_keeps_normal_shell_without_enroll(self):
+        order = []
+        shell = [{
+            'status': 'page_and_health_verified', 'project_id': 'prj_Offline',
+            'deployment_id': 'dpl_Offline', 'source_sha': self.sha,
+        }]
+        apply_lines = [{'status': 'already_configured', 'project_id': 'prj_Offline'}]
+        verify_lines = [{'status': 'verification_passed', 'project_id': 'prj_Offline'}]
+
+        polluted = 'f' * 64
+        os.environ['ONBOARDING_DELIVERY_BINDING_SHA256'] = polluted
+
+        def fake_script(script, source, binary, extra_args, env_updates, artifact_dir, **kw):
+            op = extra_args[extra_args.index('--operation') + 1]
+            order.append((script, op))
+            if script == 'launch-app.py':
+                self.assertEqual(op, 'deploy')
+                # Inherited binding must be cleared on disabled/default path.
+                self.assertEqual(env_updates.get('ONBOARDING_DELIVERY_BINDING_SHA256'), '')
+                return 0, shell, '', ''
+            if op == 'apply':
+                return 0, apply_lines, '', ''
+            return 0, verify_lines, '', ''
+
+        try:
+            with patch.object(orch, 'run_python_script', side_effect=fake_script):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    code = orch.run(
+                        self.source, str(self.binary), self.artifacts,
+                        quality_wait=lambda *a, **k: {
+                            'status': 'quality_gate_passed', 'head_sha': self.sha,
+                            'workflow_id': 1, 'run_id': 2, 'run_attempt': 1, 'event': 'push',
+                            'head_branch': 'main', 'repository_id': '2000000001',
+                            'repository_full_name': 'Owner/Example-App',
+                            'path': '.github/workflows/app-quality.yml',
+                        },
+                        sleeper=lambda _s: None, clock=lambda: 0.0,
+                        verify_window_sec=60, orchestration_lifetime_sec=120)
+        finally:
+            os.environ.pop('ONBOARDING_DELIVERY_BINDING_SHA256', None)
+        result = json.loads((self.artifacts / 'merge-onboarding-result.json').read_text())
+        self.assertEqual(code, 0)
+        self.assertEqual(result['stages']['database_delivery']['status'], 'delivery_disabled')
+        self.assertEqual([o for o in order if o[0] == 'launch-app.py'], [('launch-app.py', 'deploy')])
+        self.assertEqual(result['database']['status'], 'database_stages_unimplemented')
+        self.assertIs(result['database']['database_ready'], False)
+
+    def test_enabled_delivery_enroll_then_delivery_then_deploy_order(self):
+        mig = self.source / 'db' / 'migrations'
+        mig.mkdir(parents=True)
+        (mig / '0001_a.sql').write_text('select 1;\n', encoding='utf-8')
+        delivery_cfg = {
+            'schema_version': 1,
+            'enabled': True,
+            'auto_apply': True,
+            'namespace': 'merge_app',
+            'migrations_path': 'db/migrations',
+            'expected_project_ref': 'abcdefghijklmnop',
+            'rotate_migrator': False,
+        }
+        (self.source / 'database-delivery.config.json').write_text(
+            json.dumps(delivery_cfg, indent=2) + '\n', encoding='utf-8')
+        self.sha = git_commit(self.source, 'enable-delivery')
+        os.environ['GITHUB_SHA'] = self.sha
+        os.environ['SUPABASE_ACCESS_TOKEN'] = 'offline-access-token'
+        os.environ['SUPABASE_URL'] = 'https://abcdefghijklmnop.supabase.co'
+
+        order = []
+        digest = 'b' * 64
+        enroll_events = [{
+            'status': 'project_enrolled',
+            'project_id': 'prj_Offline',
+            'repository_id': '2000000001',
+            'team_id': 'team_Offline',
+            'source_sha': self.sha,
+            'project_name': 'example-app',
+        }]
+        shell = [{
+            'status': 'page_and_health_verified', 'project_id': 'prj_Offline',
+            'deployment_id': 'dpl_Offline', 'source_sha': self.sha,
+        }]
+        apply_lines = [{'status': 'already_configured', 'project_id': 'prj_Offline'}]
+        verify_lines = [{'status': 'verification_passed', 'project_id': 'prj_Offline'}]
+
+        def fake_script(script, source, binary, extra_args, env_updates, artifact_dir, **kw):
+            op = extra_args[extra_args.index('--operation') + 1]
+            order.append((script, op))
+            if script == 'launch-app.py' and op == 'enroll':
+                return 0, enroll_events, '', ''
+            if script == 'launch-app.py' and op == 'deploy':
+                self.assertEqual(env_updates.get('ONBOARDING_DELIVERY_BINDING_SHA256'), digest)
+                self.assertIn('--bound-project-id', extra_args)
+                self.assertEqual(
+                    extra_args[extra_args.index('--bound-project-id') + 1],
+                    'prj_Offline',
+                )
+                self.assertNotIn('--expected-project-id', extra_args)
+                return 0, shell, '', ''
+            if op == 'apply':
+                return 0, apply_lines, '', ''
+            return 0, verify_lines, '', ''
+
+        def fake_delivery_run(*_a, **_k):
+            order.append(('delivery', 'run_for_merge'))
+            return {
+                'status': 'delivery_completed_local_runtime_proof',
+                'database_ready': False,
+                'full_app_ready': False,
+                'delivery_binding_sha256': digest,
+                'namespace': 'merge_app',
+                'provision_created': True,
+                'migrations_applied': 1,
+                'local_runtime_proof': {'ok': True},
+            }
+
+        class FakeDelivery:
+            DeliveryError = type('DeliveryError', (Exception,), {})
+
+            @staticmethod
+            def run_for_merge(*a, **k):
+                return fake_delivery_run(*a, **k)
+
+        real_load = orch.load
+
+        def fake_load(name):
+            if name == 'managed_database_delivery':
+                return FakeDelivery
+            return real_load(name)
+
+        with patch.object(orch, 'load', side_effect=fake_load):
+            with patch.object(orch, 'run_python_script', side_effect=fake_script):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    code = orch.run(
+                        self.source, str(self.binary), self.artifacts,
+                        quality_wait=lambda *a, **k: {
+                            'status': 'quality_gate_passed', 'head_sha': self.sha,
+                            'workflow_id': 1, 'run_id': 9, 'run_attempt': 1, 'event': 'push',
+                            'head_branch': 'main', 'repository_id': '2000000001',
+                            'repository_full_name': 'Owner/Example-App',
+                            'path': '.github/workflows/app-quality.yml',
+                        },
+                        sleeper=lambda _s: None, clock=lambda: 0.0,
+                        verify_window_sec=60, orchestration_lifetime_sec=120)
+        result = json.loads((self.artifacts / 'merge-onboarding-result.json').read_text())
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            [x for x in order if x[0] in ('launch-app.py', 'delivery')],
+            [
+                ('launch-app.py', 'enroll'),
+                ('delivery', 'run_for_merge'),
+                ('launch-app.py', 'deploy'),
+            ],
+        )
+        self.assertEqual(
+            result['stages']['database_delivery']['status'],
+            'delivery_completed_local_runtime_proof')
+        self.assertEqual(
+            result['stages']['shell_binding']['delivery_binding_sha256'], digest)
+        self.assertEqual(
+            result['database']['status'],
+            'database_delivery_completed_deployed_verification_pending')
+        self.assertEqual(
+            result['database']['required_missing_stages'],
+            ['deployed_http_jwt_data_path_verification'])
+        self.assertIs(result['database']['database_ready'], False)
+        self.assertIs(result['database']['full_app_ready'], False)
+        self.assertIs(result['full_app_ready'], False)
+
+    def test_delivery_deploy_rejects_project_drift_between_stages(self):
+        mig = self.source / 'db' / 'migrations'
+        mig.mkdir(parents=True)
+        (mig / '0001_a.sql').write_text('select 1;\n', encoding='utf-8')
+        (self.source / 'database-delivery.config.json').write_text(json.dumps({
+            'schema_version': 1,
+            'enabled': True,
+            'auto_apply': True,
+            'namespace': 'merge_app',
+            'migrations_path': 'db/migrations',
+            'expected_project_ref': 'abcdefghijklmnop',
+            'rotate_migrator': False,
+        }, indent=2) + '\n', encoding='utf-8')
+        self.sha = git_commit(self.source, 'enable-delivery-drift')
+        os.environ['GITHUB_SHA'] = self.sha
+        os.environ['SUPABASE_ACCESS_TOKEN'] = 'offline-access-token'
+        os.environ['SUPABASE_URL'] = 'https://abcdefghijklmnop.supabase.co'
+        digest = 'c' * 64
+
+        def fake_script(script, source, binary, extra_args, env_updates, artifact_dir, **kw):
+            op = extra_args[extra_args.index('--operation') + 1]
+            if script == 'launch-app.py' and op == 'enroll':
+                return 0, [{
+                    'status': 'project_enrolled',
+                    'project_id': 'prj_Enrolled',
+                    'repository_id': '2000000001',
+                    'team_id': 'team_Offline',
+                    'source_sha': self.sha,
+                }], '', ''
+            if script == 'launch-app.py' and op == 'deploy':
+                self.assertEqual(
+                    extra_args[extra_args.index('--bound-project-id') + 1],
+                    'prj_Enrolled')
+                # Inventory drift: deploy reports a different project.
+                return 0, [{
+                    'status': 'page_and_health_verified',
+                    'project_id': 'prj_Other',
+                    'deployment_id': 'dpl_Other',
+                    'source_sha': self.sha,
+                }], '', ''
+            raise AssertionError('dns must not run after project drift')
+
+        class FakeDelivery:
+            DeliveryError = type('DeliveryError', (Exception,), {})
+
+            @staticmethod
+            def run_for_merge(*_a, **_k):
+                return {
+                    'status': 'delivery_completed_local_runtime_proof',
+                    'delivery_binding_sha256': digest,
+                    'namespace': 'merge_app',
+                    'provision_created': True,
+                    'migrations_applied': 1,
+                    'local_runtime_proof': {'ok': True},
+                }
+
+        real_load = orch.load
+
+        def fake_load(name):
+            if name == 'managed_database_delivery':
+                return FakeDelivery
+            return real_load(name)
+
+        with patch.object(orch, 'load', side_effect=fake_load):
+            with patch.object(orch, 'run_python_script', side_effect=fake_script):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    code = orch.run(
+                        self.source, str(self.binary), self.artifacts,
+                        quality_wait=lambda *a, **k: {
+                            'status': 'quality_gate_passed', 'head_sha': self.sha,
+                            'workflow_id': 1, 'run_id': 9, 'run_attempt': 1, 'event': 'push',
+                            'head_branch': 'main', 'repository_id': '2000000001',
+                            'repository_full_name': 'Owner/Example-App',
+                            'path': '.github/workflows/app-quality.yml',
+                        },
+                        sleeper=lambda _s: None, clock=lambda: 0.0,
+                        verify_window_sec=60, orchestration_lifetime_sec=120)
+        result = json.loads((self.artifacts / 'merge-onboarding-result.json').read_text())
+        self.assertEqual(code, 1)
+        self.assertEqual(result['status'], 'deploy_project_drift')
+        self.assertEqual(
+            result['stages']['shell_binding']['enrolled_project_id'], 'prj_Enrolled')
+        self.assertEqual(
+            result['stages']['shell_binding']['deployed_project_id'], 'prj_Other')
+
+    def test_delivery_failure_blocks_deploy_and_dns(self):
+        mig = self.source / 'db' / 'migrations'
+        mig.mkdir(parents=True)
+        (mig / '0001_a.sql').write_text('select 1;\n', encoding='utf-8')
+        (self.source / 'database-delivery.config.json').write_text(json.dumps({
+            'schema_version': 1,
+            'enabled': True,
+            'auto_apply': True,
+            'namespace': 'merge_app',
+            'migrations_path': 'db/migrations',
+            'expected_project_ref': 'abcdefghijklmnop',
+            'rotate_migrator': False,
+        }, indent=2) + '\n', encoding='utf-8')
+        self.sha = git_commit(self.source, 'enable-delivery-fail')
+        os.environ['GITHUB_SHA'] = self.sha
+        os.environ['SUPABASE_ACCESS_TOKEN'] = 'offline-access-token'
+        os.environ['SUPABASE_URL'] = 'https://abcdefghijklmnop.supabase.co'
+        order = []
+
+        def fake_script(script, source, binary, extra_args, env_updates, artifact_dir, **kw):
+            op = extra_args[extra_args.index('--operation') + 1]
+            order.append((script, op))
+            if script == 'launch-app.py' and op == 'enroll':
+                return 0, [{
+                    'status': 'project_enrolled',
+                    'project_id': 'prj_Offline',
+                    'repository_id': '2000000001',
+                    'team_id': 'team_Offline',
+                    'source_sha': self.sha,
+                }], '', ''
+            raise AssertionError('deploy/dns must not run after delivery failure')
+
+        class FakeDelivery:
+            class DeliveryError(Exception):
+                pass
+
+            @staticmethod
+            def run_for_merge(*a, **k):
+                order.append(('delivery', 'failed'))
+                return {'status': 'recovery_required', 'namespace': 'merge_app'}
+
+        real_load = orch.load
+
+        def fake_load(name):
+            if name == 'managed_database_delivery':
+                return FakeDelivery
+            return real_load(name)
+
+        with patch.object(orch, 'load', side_effect=fake_load):
+            with patch.object(orch, 'run_python_script', side_effect=fake_script):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    code = orch.run(
+                        self.source, str(self.binary), self.artifacts,
+                        quality_wait=lambda *a, **k: {
+                            'status': 'quality_gate_passed', 'head_sha': self.sha,
+                            'workflow_id': 1, 'run_id': 3, 'run_attempt': 1, 'event': 'push',
+                            'head_branch': 'main', 'repository_id': '2000000001',
+                            'repository_full_name': 'Owner/Example-App',
+                            'path': '.github/workflows/app-quality.yml',
+                        },
+                        sleeper=lambda _s: None, clock=lambda: 0.0)
+        result = json.loads((self.artifacts / 'merge-onboarding-result.json').read_text())
+        self.assertEqual(code, 1)
+        self.assertEqual(result['status'], 'database_delivery_failed')
+        self.assertEqual(result['stages']['provider_writes'], 'blocked')
+        self.assertEqual(order, [('launch-app.py', 'enroll'), ('delivery', 'failed')])
+
 
 if __name__ == '__main__':
     unittest.main()

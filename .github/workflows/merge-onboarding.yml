@@ -31,6 +31,30 @@ jobs:
           node-version: '24'
       - name: Install pinned deployment CLI
         run: npm install --prefix "$RUNNER_TEMP/launch-vercel" vercel@65.4.0 --ignore-scripts --no-audit --no-fund
+      - name: Install pinned Python deps when database delivery is enabled
+        run: |
+          set +e
+          python3 scripts/database-delivery-config.py --workflow-deps-required
+          code=$?
+          set -e
+          INTERPRETER_FILE="$RUNNER_TEMP/mdb-delivery-interpreter"
+          if [ "$code" -eq 10 ]; then
+            python3 -m venv "$RUNNER_TEMP/mdb-delivery-venv"
+            "$RUNNER_TEMP/mdb-delivery-venv/bin/pip" install \
+              --disable-pip-version-check \
+              -r requirements-bootstrap.txt
+            INTERPRETER="$RUNNER_TEMP/mdb-delivery-venv/bin/python"
+            printf '%s\n' "$INTERPRETER" > "$INTERPRETER_FILE"
+            echo "MDB_DELIVERY_PYTHON=$INTERPRETER" >> "$GITHUB_ENV"
+            echo "MDB_DELIVERY_INTERPRETER_FILE=$INTERPRETER_FILE" >> "$GITHUB_ENV"
+          elif [ "$code" -eq 0 ]; then
+            INTERPRETER="$(command -v python3)"
+            printf '%s\n' "$INTERPRETER" > "$INTERPRETER_FILE"
+            echo "MDB_DELIVERY_PYTHON=$INTERPRETER" >> "$GITHUB_ENV"
+            echo "MDB_DELIVERY_INTERPRETER_FILE=$INTERPRETER_FILE" >> "$GITHUB_ENV"
+          else
+            exit "$code"
+          fi
       - name: Merge-driven shell deploy and hostname DNS
         env:
           VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
@@ -43,7 +67,9 @@ jobs:
           ARTIFACT_DIR: ${{ runner.temp }}/merge-onboarding-artifacts
         run: >-
           mkdir -p "$ARTIFACT_DIR"
-          && python3 scripts/merge-onboarding.py --source "$GITHUB_WORKSPACE"
+          && MDB_PY="$(tr -d '\n' < "$MDB_DELIVERY_INTERPRETER_FILE")"
+          && test -n "$MDB_PY"
+          && "$MDB_PY" scripts/merge-onboarding.py --source "$GITHUB_WORKSPACE"
           --vercel-bin "$RUNNER_TEMP/launch-vercel/node_modules/.bin/vercel"
           --artifact-dir "$ARTIFACT_DIR"
       - name: Upload merge-onboarding artifacts

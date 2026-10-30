@@ -7,8 +7,16 @@ Does not read DATABASE_URL / SUPABASE_DB_URL. Importing this module performs
 no network or database action.
 
 This slice provisions per-app data + control schemas, applies reviewed
-migrations as the migrator LOGIN, and checks RLS invariants. It does not
-wire GitHub Secrets, managed APIs, poolers, or live workflows.
+migrations as the migrator LOGIN, and checks RLS invariants. Delivery
+orchestration (Management API login-role, pooler, Vercel custody) lives in
+companion modules; this core still requires an explicit provisioner connection.
+
+Effective provisioner identity is CURRENT_USER. Direct bootstrap logins must
+remain NOSUPERUSER CREATEROLE NOBYPASSRLS. Native CLI login may SET ROLE to a
+bound trusted bootstrap root (for example postgres) that may hold BYPASSRLS;
+callers must pass expected_provisioner_role and allow_trusted_bootstrap_bypassrls.
+App owner/migrator/runtime roles always stay NOSUPERUSER NOBYPASSRLS NOCREATEROLE.
+Ledger authorization continues to use session_user for the migrator LOGIN.
 """
 
 from __future__ import annotations
@@ -18,7 +26,7 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 # NAMEDATALEN-1 = 63; longest derived suffix is "_migrator" (9).
 MAX_NAMESPACE_LEN = 63 - len("_migrator")
@@ -339,9 +347,35 @@ def split_sql_statements(script: str) -> List[str]:
     return statements
 
 
+def _reject_symlink_ancestors(path: Path, *, stop_at: Optional[Path] = None) -> None:
+    """Reject symlink ancestors before resolve, including same-repo links."""
+    cur = Path(path)
+    stop = stop_at.resolve() if stop_at is not None else None
+    seen: set[Path] = set()
+    while True:
+        if cur in seen:
+            break
+        seen.add(cur)
+        try:
+            if cur.is_symlink():
+                raise ManagedDatabaseError(
+                    FailureCode.MIGRATION_PATH, "symlink ancestor rejected"
+                )
+        except ManagedDatabaseError:
+            raise
+        except OSError:
+            _raise_public(FailureCode.MIGRATION_PATH, "unresolvable migration path")
+        if stop is not None and cur.resolve() == stop:
+            break
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+
+
 def discover_migrations(migrations_dir: Path) -> List[Migration]:
     root = Path(migrations_dir)
-    if not root.is_dir():
+    _reject_symlink_ancestors(root)
+    if not root.is_dir() or root.is_symlink():
         raise ManagedDatabaseError(FailureCode.MIGRATION_PATH, "directory not found")
     try:
         resolved_root = root.resolve(strict=True)
@@ -351,6 +385,7 @@ def discover_migrations(migrations_dir: Path) -> List[Migration]:
     found: List[Migration] = []
     seen_ids: set[str] = set()
     for path in sorted(root.glob("*.sql")):
+        _reject_symlink_ancestors(path, stop_at=root)
         if path.is_symlink() or not path.is_file():
             raise ManagedDatabaseError(
                 FailureCode.MIGRATION_PATH, "symlink or non-file rejected"
@@ -380,6 +415,138 @@ def discover_migrations(migrations_dir: Path) -> List[Migration]:
         )
     found.sort(key=lambda item: item.migration_id)
     return found
+
+
+def migrations_from_captured_manifest(
+    manifest: Sequence[Mapping[str, Any]],
+) -> List[Migration]:
+    """Build Migration objects from a HEAD-captured immutable manifest."""
+    found: List[Migration] = []
+    seen_ids: set[str] = set()
+    for item in manifest:
+        migration_id = item.get("migration_id")
+        sql_bytes = item.get("sql_bytes")
+        checksum = item.get("checksum_sha256")
+        relative = item.get("relative_path")
+        if not isinstance(migration_id, str) or not MIGRATION_ID_RE.fullmatch(migration_id):
+            raise ManagedDatabaseError(FailureCode.MIGRATION_ID_INVALID)
+        if migration_id in seen_ids:
+            raise ManagedDatabaseError(FailureCode.MIGRATION_DUPLICATE, migration_id)
+        if not isinstance(sql_bytes, (bytes, bytearray)) or not sql_bytes:
+            raise ManagedDatabaseError(FailureCode.MIGRATION_PATH, "captured bytes missing")
+        sql_b = bytes(sql_bytes)
+        digest = hashlib.sha256(sql_b).hexdigest()
+        if not isinstance(checksum, str) or checksum != digest:
+            raise ManagedDatabaseError(FailureCode.MIGRATION_CHECKSUM, migration_id)
+        seen_ids.add(migration_id)
+        found.append(
+            Migration(
+                migration_id=migration_id,
+                path=Path(relative) if isinstance(relative, str) else Path(migration_id + ".sql"),
+                sql_bytes=sql_b,
+                checksum_sha256=digest,
+            )
+        )
+    found.sort(key=lambda item: item.migration_id)
+    return found
+
+
+@dataclass(frozen=True)
+class CatalogProbeResult:
+    status: str  # absent | owned | collision
+    reason: Optional[str] = None
+    created: bool = False
+
+
+def inspect_app_catalog_state(
+    *,
+    namespace: str,
+    repository_id: str,
+    project_ref: str,
+    provisioner_dsn: Optional[str] = None,
+    provisioner_connection: Any = None,
+    expected_provisioner_role: Optional[str] = None,
+    allow_trusted_bootstrap_bypassrls: bool = False,
+) -> CatalogProbeResult:
+    """Read-only catalog probe: absent / owned / collision. No DDL or passwords."""
+    namespace = validate_namespace(namespace)
+    repository_id = validate_repository_id(repository_id)
+    project_ref = validate_project_ref(project_ref)
+    roles = derive_role_names(namespace)
+    conn, owned = _connection_from(
+        dsn=provisioner_dsn, connection=provisioner_connection
+    )
+    try:
+        _reject_active_caller_transaction(conn, owned=owned)
+        provisioner = _resolve_provisioner_identity(
+            conn,
+            expected_provisioner_role=expected_provisioner_role,
+            allow_trusted_bootstrap_bypassrls=allow_trusted_bootstrap_bypassrls,
+        )
+        control_present = _schema_exists(conn, roles.control_schema)
+        data_present = _schema_exists(conn, namespace)
+        owner_present = _role_exists(conn, roles.owner)
+        migrator_present = _role_exists(conn, roles.migrator)
+        runtime_present = _role_exists(conn, roles.runtime)
+        any_present = any(
+            (control_present, data_present, owner_present, migrator_present, runtime_present)
+        )
+        if not any_present:
+            return CatalogProbeResult(status="absent")
+        if control_present:
+            from psycopg import sql as psql
+
+            owner_of_control = _schema_owner(conn, roles.control_schema)
+            if owner_of_control != provisioner:
+                return CatalogProbeResult(status="collision", reason=FailureCode.CONTROL_COLLISION)
+            if not data_present:
+                return CatalogProbeResult(status="collision", reason=FailureCode.OWNERSHIP_MISMATCH)
+            if _schema_owner(conn, namespace) != roles.owner:
+                return CatalogProbeResult(status="collision", reason=FailureCode.OWNERSHIP_MISMATCH)
+            binding = conn.execute(
+                psql.SQL(
+                    """
+                    SELECT namespace, repository_id, project_ref,
+                           owner_role, migrator_role, runtime_role, provisioner_role
+                    FROM {}.ownership_binding
+                    """
+                ).format(psql.Identifier(roles.control_schema))
+            ).fetchone()
+            if binding is None:
+                return CatalogProbeResult(status="collision", reason=FailureCode.CONTROL_COLLISION)
+            if (
+                binding[0] != namespace
+                or binding[1] != repository_id
+                or binding[2] != project_ref
+                or binding[3] != roles.owner
+                or binding[4] != roles.migrator
+                or binding[5] != roles.runtime
+                or binding[6] != provisioner
+            ):
+                return CatalogProbeResult(status="collision", reason=FailureCode.OWNERSHIP_MISMATCH)
+            try:
+                _verify_role_invariants(conn, roles, provisioner=provisioner)
+                _verify_schema_acl_invariants(conn, namespace=namespace, roles=roles)
+            except ManagedDatabaseError as exc:
+                return CatalogProbeResult(status="collision", reason=exc.code)
+            return CatalogProbeResult(status="owned")
+        if data_present:
+            return CatalogProbeResult(status="collision", reason=FailureCode.SCHEMA_COLLISION)
+        for present, code in (
+            (owner_present, FailureCode.ROLE_COLLISION),
+            (migrator_present, FailureCode.ROLE_COLLISION),
+            (runtime_present, FailureCode.ROLE_COLLISION),
+        ):
+            if present:
+                return CatalogProbeResult(status="collision", reason=code)
+        return CatalogProbeResult(status="collision", reason=FailureCode.OWNERSHIP_MISMATCH)
+    except ManagedDatabaseError as exc:
+        return CatalogProbeResult(status="collision", reason=exc.code)
+    except Exception:
+        _raise_public(FailureCode.INTERNAL)
+    finally:
+        if owned:
+            conn.close()
 
 
 def advisory_lock_keys(namespace: str) -> Tuple[int, int]:
@@ -503,6 +670,73 @@ def _schema_owner(conn, schema_name: str) -> Optional[str]:
     return None if row is None else row[0]
 
 
+def _resolve_provisioner_identity(
+    conn,
+    *,
+    expected_provisioner_role: Optional[str] = None,
+    allow_trusted_bootstrap_bypassrls: bool = False,
+) -> str:
+    """Return the effective privileged provisioner (CURRENT_USER).
+
+    Direct logins require session_user == current_user and
+    NOSUPERUSER+CREATEROLE+NOBYPASSRLS. Delegated CLI login must bind
+    expected_provisioner_role to CURRENT_USER after SET ROLE; that trusted
+    root may hold BYPASSRLS only when allow_trusted_bootstrap_bypassrls is set.
+    """
+    if allow_trusted_bootstrap_bypassrls and expected_provisioner_role is None:
+        raise ManagedDatabaseError(
+            FailureCode.AUTH_DENIED,
+            "trusted bypass requires bound provisioner role",
+        )
+    session_user = conn.execute("SELECT session_user").fetchone()[0]
+    current_user = conn.execute("SELECT current_user").fetchone()[0]
+    if expected_provisioner_role is not None:
+        if (
+            not isinstance(expected_provisioner_role, str)
+            or not expected_provisioner_role.strip()
+        ):
+            raise ManagedDatabaseError(
+                FailureCode.AUTH_DENIED, "provisioner role binding required"
+            )
+        if current_user != expected_provisioner_role.strip():
+            raise ManagedDatabaseError(
+                FailureCode.AUTH_DENIED,
+                "effective provisioner must match bound role",
+            )
+        provisioner = current_user
+    else:
+        if session_user != current_user:
+            raise ManagedDatabaseError(
+                FailureCode.AUTH_DENIED,
+                "delegated provisioner requires explicit role binding",
+            )
+        provisioner = session_user
+
+    flags = conn.execute(
+        """
+        SELECT rolsuper, rolcreaterole, rolbypassrls
+        FROM pg_roles WHERE rolname = current_user
+        """
+    ).fetchone()
+    if flags is None or flags[0] or not flags[1]:
+        raise ManagedDatabaseError(
+            FailureCode.AUTH_DENIED,
+            "provisioner must be NOSUPERUSER CREATEROLE",
+        )
+    if flags[2] and not allow_trusted_bootstrap_bypassrls:
+        raise ManagedDatabaseError(
+            FailureCode.AUTH_DENIED,
+            "provisioner must be NOSUPERUSER CREATEROLE NOBYPASSRLS",
+        )
+    if not conn.execute(
+        "SELECT has_database_privilege(current_user, current_database(), 'CREATE')"
+    ).fetchone()[0]:
+        raise ManagedDatabaseError(
+            FailureCode.AUTH_DENIED, "provisioner needs CREATE on database"
+        )
+    return provisioner
+
+
 def provision_app(
     *,
     namespace: str,
@@ -512,10 +746,12 @@ def provision_app(
     runtime_password: str,
     provisioner_dsn: Optional[str] = None,
     provisioner_connection: Any = None,
+    expected_provisioner_role: Optional[str] = None,
+    allow_trusted_bootstrap_bypassrls: bool = False,
 ) -> ProvisionResult:
     """Create or verify an owned app schema + per-app control schema.
 
-    Must run as a NOSUPERUSER CREATEROLE login with CREATE on the database.
+    Effective provisioner is CURRENT_USER (see _resolve_provisioner_identity).
     Never resets existing role passwords. Never adopts unmarked schemas/roles.
     Provided connections must be idle and autocommit-enabled; rejection never
     rolls back caller-owned work or changes connection configuration.
@@ -540,6 +776,8 @@ def provision_app(
             migrator_password=mig_secret,
             runtime_password=run_secret,
             roles=roles,
+            expected_provisioner_role=expected_provisioner_role,
+            allow_trusted_bootstrap_bypassrls=allow_trusted_bootstrap_bypassrls,
         )
     except ManagedDatabaseError:
         raise
@@ -559,29 +797,18 @@ def _provision_on_connection(
     migrator_password: _Secret,
     runtime_password: _Secret,
     roles: RoleNames,
+    expected_provisioner_role: Optional[str] = None,
+    allow_trusted_bootstrap_bypassrls: bool = False,
 ) -> ProvisionResult:
     from psycopg import sql as psql
 
     _assert_no_public_create(conn)
 
-    provisioner = conn.execute("SELECT session_user").fetchone()[0]
-    flags = conn.execute(
-        """
-        SELECT rolsuper, rolcreaterole, rolbypassrls
-        FROM pg_roles WHERE rolname = session_user
-        """
-    ).fetchone()
-    if flags is None or flags[0] or not flags[1] or flags[2]:
-        raise ManagedDatabaseError(
-            FailureCode.AUTH_DENIED,
-            "provisioner must be NOSUPERUSER CREATEROLE NOBYPASSRLS",
-        )
-    if not conn.execute(
-        "SELECT has_database_privilege(session_user, current_database(), 'CREATE')"
-    ).fetchone()[0]:
-        raise ManagedDatabaseError(
-            FailureCode.AUTH_DENIED, "provisioner needs CREATE on database"
-        )
+    provisioner = _resolve_provisioner_identity(
+        conn,
+        expected_provisioner_role=expected_provisioner_role,
+        allow_trusted_bootstrap_bypassrls=allow_trusted_bootstrap_bypassrls,
+    )
 
     control_present = _schema_exists(conn, roles.control_schema)
     data_present = _schema_exists(conn, namespace)
@@ -726,7 +953,12 @@ def _provision_on_connection(
                 psql.Identifier(roles.runtime),
             )
         )
-        conn.execute("RESET ROLE")
+        # Restore the effective provisioner (CURRENT_USER at entry). RESET ROLE
+        # would return to session_user, which breaks delegated CLI login where
+        # session_user is the ephemeral role and provisioner is SET ROLE'd.
+        conn.execute(
+            psql.SQL("SET ROLE {}").format(psql.Identifier(provisioner))
+        )
         conn.execute(
             psql.SQL("REVOKE ALL ON SCHEMA {} FROM PUBLIC").format(
                 psql.Identifier(roles.control_schema)
@@ -817,6 +1049,104 @@ def _provision_on_connection(
         roles=roles,
         created=True,
     )
+
+
+def set_owned_login_password(
+    *,
+    namespace: str,
+    repository_id: str,
+    role_kind: str,
+    new_password: str,
+    provisioner_dsn: Optional[str] = None,
+    provisioner_connection: Any = None,
+    expected_provisioner_role: Optional[str] = None,
+    allow_trusted_bootstrap_bypassrls: bool = False,
+    project_ref: Optional[str] = None,
+) -> None:
+    """Explicit password change for owned migrator or runtime LOGIN only.
+
+    Independently enforces ownership/project/schema/role/grant invariants
+    before altering the derived scoped login. Uses a session-temp SECURITY
+    INVOKER helper so the secret is never interpolated into SQL source text.
+    Never targets postgres/admin/other-app roles. Rejects active caller
+    transactions. Does not weaken ledger session_user authorization.
+    """
+    namespace = validate_namespace(namespace)
+    repository_id = validate_repository_id(repository_id)
+    if project_ref is not None:
+        project_ref = validate_project_ref(project_ref)
+    if role_kind not in ("migrator", "runtime"):
+        raise ManagedDatabaseError(FailureCode.AUTH_DENIED, "role_kind")
+    secret = _require_secret(new_password, "new_password")
+    roles = derive_role_names(namespace)
+    target = roles.migrator if role_kind == "migrator" else roles.runtime
+
+    conn, owned = _connection_from(
+        dsn=provisioner_dsn, connection=provisioner_connection
+    )
+    try:
+        _reject_active_caller_transaction(conn, owned=owned)
+        provisioner = _resolve_provisioner_identity(
+            conn,
+            expected_provisioner_role=expected_provisioner_role,
+            allow_trusted_bootstrap_bypassrls=allow_trusted_bootstrap_bypassrls,
+        )
+        from psycopg import sql as psql
+
+        binding = conn.execute(
+            psql.SQL(
+                """
+                SELECT namespace, repository_id, project_ref, owner_role,
+                       migrator_role, runtime_role, provisioner_role
+                FROM {}.ownership_binding
+                """
+            ).format(psql.Identifier(roles.control_schema))
+        ).fetchone()
+        if (
+            binding is None
+            or binding[0] != namespace
+            or binding[1] != repository_id
+            or binding[3] != roles.owner
+            or binding[4] != roles.migrator
+            or binding[5] != roles.runtime
+            or binding[6] != provisioner
+        ):
+            raise ManagedDatabaseError(FailureCode.OWNERSHIP_MISMATCH)
+        if project_ref is not None and binding[2] != project_ref:
+            raise ManagedDatabaseError(FailureCode.OWNERSHIP_MISMATCH)
+        if _schema_owner(conn, roles.control_schema) != provisioner:
+            raise ManagedDatabaseError(FailureCode.CONTROL_COLLISION)
+        if not _schema_exists(conn, namespace) or _schema_owner(conn, namespace) != roles.owner:
+            raise ManagedDatabaseError(FailureCode.OWNERSHIP_MISMATCH)
+        _verify_role_invariants(conn, roles, provisioner=provisioner)
+        _verify_schema_acl_invariants(conn, namespace=namespace, roles=roles)
+        conn.execute(
+            """
+            CREATE OR REPLACE FUNCTION pg_temp.md_set_login_password(
+              role_name text, pw text
+            )
+            RETURNS void
+            LANGUAGE plpgsql
+            SECURITY INVOKER
+            SET search_path = pg_catalog, pg_temp
+            AS $fn$
+            BEGIN
+              EXECUTE format('ALTER ROLE %I PASSWORD %L', role_name, pw);
+            END;
+            $fn$;
+            """
+        )
+        conn.execute(
+            "SELECT pg_temp.md_set_login_password(%s, %s)",
+            (target, secret.value),
+        )
+    except ManagedDatabaseError:
+        raise
+    except Exception:
+        _raise_public(FailureCode.INTERNAL)
+    finally:
+        if owned:
+            conn.close()
 
 
 def _membership_edges(conn) -> List[Tuple[str, str, bool, bool, bool]]:
@@ -980,11 +1310,16 @@ def migrate_app(
     *,
     namespace: str,
     repository_id: str,
-    migrations_dir: Path,
+    migrations_dir: Optional[Path] = None,
     migrator_dsn: Optional[str] = None,
     migrator_connection: Any = None,
+    migrations: Optional[Sequence[Migration]] = None,
 ) -> MigrateResult:
     """Apply reviewed migrations as the restricted migrator LOGIN.
+
+    Prefer passing a pre-captured ``migrations`` list (immutable HEAD bytes)
+    so later filesystem mutations cannot change what executes. When omitted,
+    migrations are discovered from ``migrations_dir``.
 
     Safety invariants (role graph, schema ACLs, table/column ACLs, RLS, and
     app-routine privilege boundaries) run inside the DDL+ledger transaction
@@ -994,7 +1329,12 @@ def migrate_app(
     namespace = validate_namespace(namespace)
     repository_id = validate_repository_id(repository_id)
     roles = derive_role_names(namespace)
-    migrations = discover_migrations(Path(migrations_dir))
+    if migrations is not None:
+        migrations = list(migrations)
+    elif migrations_dir is not None:
+        migrations = discover_migrations(Path(migrations_dir))
+    else:
+        raise ManagedDatabaseError(FailureCode.MIGRATION_PATH, "migrations required")
     key1, key2 = advisory_lock_keys(namespace)
 
     conn, owned = _connection_from(dsn=migrator_dsn, connection=migrator_connection)

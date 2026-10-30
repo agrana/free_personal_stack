@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "enabled": false,
+  "auto_apply": false,
+  "namespace": null,
+  "migrations_path": null,
+  "expected_project_ref": null,
+  "rotate_migrator": false
+}
