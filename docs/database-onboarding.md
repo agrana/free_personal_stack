@@ -42,9 +42,18 @@ It runs as `supabase_read_only_user`. The client never falls back to the
 write-capable `/database/query` endpoint, never accepts arbitrary SQL/URLs, and
 never echoes raw provider bodies into reports.
 
-## Remaining gates (not this slice)
+## Managed foundation core
 
-- Privileged/managed provisioning of APP-003 control schema, app namespace, and roles (when missing)
+The [managed database foundation](managed-database-foundation.md) provides
+app-specific data/control schemas, restricted roles, transactional migrations,
+and runtime RLS checks exercised against disposable PostgreSQL 17. Its library
+is separate from this read-only merge workflow. Secure credential delivery,
+managed-provider integration, and deployed runtime verification remain required
+before enabling live provisioning.
+
+## Remaining live gates
+
+- Managed-compatible provisioning of app-specific data/control schemas and roles against the approved target
 - Reviewed app-scoped schema migrations against the approved target
 - Deployed application runtime connectivity under RLS-governed credentials
 - Cross-user and cross-app isolation verification
