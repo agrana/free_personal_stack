@@ -1,6 +1,14 @@
+![Solution architecture: GitHub Actions coordinates Cloudflare DNS and Vercel deployment, with a conditional Supabase data and authentication connection.](docs/architecture/solution-overview.svg)
+
 # Free Personal Stack
 
 A reusable Next.js template whose required GitHub-only onboarding includes an intended hostname, a Supabase connection, app-scoped schema migrations, deployment, DNS and end-to-end verification. The [onboarding contract and implementation status](docs/end-to-end-onboarding.md) distinguish required outcomes from the currently shipped partial workflows.
+
+## Solution overview
+
+- **Cloudflare → Vercel → Supabase** shows hostname resolution, application hosting and the intended application data/authentication connection. Cloudflare uses a DNS-only CNAME; visitors connect directly to Vercel over HTTPS.
+- **GitHub Actions** runs quality checks and coordinates onboarding using repository Secrets and merge-reviewed configuration.
+- **Dashed arrows** mark conditional capabilities: the initial application shell is database-free, and database automation requires explicit configuration and approval. Complete onboarding still requires verified runtime database access, migrations and RLS isolation; see the [implementation status](docs/end-to-end-onboarding.md).
 
 ## Quickstart: template → credentials → deploy → DNS → verify
 
@@ -25,16 +33,7 @@ Configure the intended hostname and authoritative zone in tracked `onboarding.co
 
 See **[Secrets-only launch guide](docs/secrets-only-launch.md)** for shell-stage permissions, team ID, database choices and recovery. Required hostname setup: **[Custom domain](docs/custom-domain.md)**. Maintainer local stub rehearsal (not live): **[New app runbook](docs/new-app-runbook.md)**.
 
-## What the initial deployment includes
-
-- A server-rendered **Application ready** page with no application database reads or writes, demo data or inherited navigation.
-- `/api/health` reporting process liveness and the exact deployed source revision; it does not certify database access, authentication or RLS.
-- Reusable auth code retained at `/auth/signin` and `/auth/signout`, without links from the landing shell. Authentication settings and database isolation still need review before product use.
-- An explicitly scoped, repository-owned Vercel project. **Merge onboarding** handles routine shell deploy and hostname/DNS; maintainer **Launch app** / **Custom domain** workflows remain available. Database/schema provisioning and email changes retain their own approval boundaries.
-
-Use an existing Supabase project, or create a dedicated project in Supabase before launch. A dedicated database is preferred for isolation. Reusing a shared project is your choice and carries shared-resource risk; configure app-scoped schema and RLS and verify cross-app isolation **before adding data features**. The launcher does not create provider databases or apply migrations. Free-plan limits and provider charges still apply.
-
-## Build your product with a coding agent
+## Onboard your agent
 
 Open your generated repository in your preferred coding agent and use:
 
@@ -51,6 +50,15 @@ verification results and distinguish local tests from live deployment evidence.
 ```
 
 Agent instructions and local verification: [AGENTS.md](AGENTS.md).
+
+## What the initial deployment includes
+
+- A server-rendered **Application ready** page with no application database reads or writes, demo data or inherited navigation.
+- `/api/health` reporting process liveness and the exact deployed source revision; it does not certify database access, authentication or RLS.
+- Reusable auth code retained at `/auth/signin` and `/auth/signout`, without links from the landing shell. Authentication settings and database isolation still need review before product use.
+- An explicitly scoped, repository-owned Vercel project. **Merge onboarding** handles routine shell deploy and hostname/DNS; maintainer **Launch app** / **Custom domain** workflows remain available. Database/schema provisioning and email changes retain their own approval boundaries.
+
+Use an existing Supabase project, or create a dedicated project in Supabase before launch. A dedicated database is preferred for isolation. Reusing a shared project is your choice and carries shared-resource risk; configure app-scoped schema and RLS and verify cross-app isolation **before adding data features**. The launcher does not create provider databases or apply migrations. Free-plan limits and provider charges still apply.
 
 ## Advanced and historical paths
 
