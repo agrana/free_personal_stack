@@ -41,6 +41,18 @@ password placeholders in the advertised URL are discarded. This selects a client
 connection endpoint; it leaves shared project pooler configuration unchanged and
 never connects on port 6543. See Supabase's [connection-mode documentation](https://supabase.com/docs/guides/database/connecting-to-postgres).
 
+Failure artifacts may include a fixed `provider_operation` and integer
+`provider_http_status` when a failing HTTP response was received; they never
+include provider URLs, response bodies or credentials as diagnostics. An
+attempted CLI login POST that fails or has an invalid response reports
+`cli_login_mutation_possible: true`, including when no HTTP response arrived.
+This is an uncertain outcome, not proof of a role change. Do not blindly retry;
+review the provider state and the shared-role impact before any further action.
+A previous POST with an unknown outcome remains unresolved, including earlier
+generic failures whose operation is unknown. Run artifacts are ephemeral and the
+local checkpoint is not a durable across-run record. This diagnostic patch alone
+must not be used to automatically retry or adopt a role.
+
 Never call `DELETE /cli/login-role` (shared CLI role deletion). Never reset the
 project `postgres` password or unrelated memberships to repair login-role
 failures — fail closed with a safe capability code. Provider CLI roles may be

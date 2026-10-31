@@ -43,6 +43,21 @@ FIXTURE_SSLMODE = 'disable'
 class ProviderError(Exception):
     """Stable machine-readable provider failure code (never includes secrets)."""
 
+    _operation: Optional[str] = None
+    _http_status: Optional[int] = None
+
+    def diagnostic_fields(self) -> Dict[str, Any]:
+        result: Dict[str, Any] = {}
+        operation = getattr(self, '_operation', None)
+        if operation in ('supabase_pooler_get', 'supabase_cli_login_post'):
+            result['provider_operation'] = operation
+        status = getattr(self, '_http_status', None)
+        if operation in ('supabase_pooler_get', 'supabase_cli_login_post') and type(status) is int and 100 <= status <= 599:
+            result['provider_http_status'] = status
+        if operation == 'supabase_cli_login_post':
+            result['cli_login_mutation_possible'] = True
+        return result
+
     def __repr__(self) -> str:
         return f"ProviderError({str(self)!r})"
 
@@ -178,28 +193,36 @@ def create_cli_login_role(
         'Content-Type': 'application/json',
     }
     try:
-        status, payload = transport.request(
-            method='POST', url=url, headers=headers, body=body, timeout=timeout)
-    except ProviderError:
+        try:
+            status, payload = transport.request(
+                method='POST', url=url, headers=headers, body=body, timeout=timeout)
+        except ProviderError:
+            raise
+        except Exception:
+            raise ProviderError('provider_transport_failed') from None
+        if status not in (200, 201):
+            error = ProviderError(_map_http_status(status))
+            error._http_status = status
+            raise error
+        data = _parse_json(payload)
+        if not isinstance(data, dict):
+            raise ProviderError('cli_login_response_invalid')
+        role = data.get('role')
+        password = data.get('password')
+        ttl = data.get('ttl_seconds')
+        if not isinstance(role, str) or not role.strip():
+            raise ProviderError('cli_login_response_invalid')
+        if not isinstance(password, str) or not password:
+            raise ProviderError('cli_login_response_invalid')
+        if isinstance(ttl, bool) or not isinstance(ttl, int) or ttl < 1:
+            raise ProviderError('cli_login_response_invalid')
+    except ProviderError as exc:
+        exc._operation = 'supabase_cli_login_post'
         raise
     except Exception:
-        raise ProviderError('provider_transport_failed') from None
-    if status in (301, 302, 303, 307, 308):
-        raise ProviderError('provider_redirect_rejected')
-    if status != 201 and status != 200:
-        raise ProviderError(_map_http_status(status))
-    data = _parse_json(payload)
-    if not isinstance(data, dict):
-        raise ProviderError('cli_login_response_invalid')
-    role = data.get('role')
-    password = data.get('password')
-    ttl = data.get('ttl_seconds')
-    if not isinstance(role, str) or not role.strip():
-        raise ProviderError('cli_login_response_invalid')
-    if not isinstance(password, str) or not password:
-        raise ProviderError('cli_login_response_invalid')
-    if isinstance(ttl, bool) or not isinstance(ttl, int) or ttl < 1:
-        raise ProviderError('cli_login_response_invalid')
+        error = ProviderError('cli_login_response_invalid')
+        error._operation = 'supabase_cli_login_post'
+        raise error from None
     return CliLoginRole(role=role.strip(), password=_Secret(password), ttl_seconds=ttl)
 
 
@@ -328,16 +351,24 @@ def fetch_primary_session_pooler(
     try:
         status, payload = transport.request(
             method='GET', url=url, headers=headers, body=None, timeout=timeout)
-    except ProviderError:
+    except ProviderError as exc:
+        exc._operation = 'supabase_pooler_get'
         raise
     except Exception:
-        raise ProviderError('provider_transport_failed') from None
-    if status in (301, 302, 303, 307, 308):
-        raise ProviderError('provider_redirect_rejected')
+        error = ProviderError('provider_transport_failed')
+        error._operation = 'supabase_pooler_get'
+        raise error from None
     if status != 200:
-        raise ProviderError(_map_http_status(status))
-    data = _parse_json(payload)
-    return normalize_primary_session_pooler(data, project_ref=project_ref)
+        error = ProviderError(_map_http_status(status))
+        error._operation = 'supabase_pooler_get'
+        error._http_status = status
+        raise error
+    try:
+        data = _parse_json(payload)
+        return normalize_primary_session_pooler(data, project_ref=project_ref)
+    except ProviderError as exc:
+        exc._operation = 'supabase_pooler_get'
+        raise
 
 
 def pooler_login_username(role: str, project_ref: str) -> str:

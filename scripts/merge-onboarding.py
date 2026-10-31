@@ -572,6 +572,23 @@ def database_gap_report(preflight=None, delivery=None):
     return report
 
 
+def delivery_diagnostics(fields):
+    """Copy only fixed diagnostic values, never arbitrary provider data."""
+    if not isinstance(fields, dict):
+        return {}
+    operation = fields.get('provider_operation')
+    if operation not in ('supabase_pooler_get', 'supabase_cli_login_post',
+                         'vercel_custody_inventory_get', 'vercel_custody_value_get'):
+        return {}
+    result = {'provider_operation': operation}
+    status = fields.get('provider_http_status')
+    if type(status) is int and 100 <= status <= 599:
+        result['provider_http_status'] = status
+    if operation == 'supabase_cli_login_post' and fields.get('cli_login_mutation_possible') is True:
+        result['cli_login_mutation_possible'] = True
+    return result
+
+
 def finalize(artifact_dir, payload, code):
     write_artifact(artifact_dir, 'merge-onboarding-result.json', payload)
     emit(**payload)
@@ -788,6 +805,7 @@ def run(source, binary, artifact_dir, *, quality_wait=None, sleeper=None, clock=
                 result['stages']['database_delivery'] = {
                     'status': 'delivery_failed',
                     'error': str(exc),
+                    **delivery_diagnostics(getattr(exc, 'diagnostics', {})),
                 }
                 result['database'] = database_gap_report(
                     preflight_report, result['stages']['database_delivery'])
@@ -795,6 +813,7 @@ def run(source, binary, artifact_dir, *, quality_wait=None, sleeper=None, clock=
                 return finalize(artifact_dir, result, 1)
             result['stages']['database_delivery'] = {
                 'status': delivery_report.get('status'),
+                **delivery_diagnostics(delivery_report),
                 'config_status': delivery_report.get('config_status'),
                 'namespace': delivery_report.get('namespace'),
                 'delivery_binding_sha256': delivery_report.get('delivery_binding_sha256'),
@@ -831,6 +850,7 @@ def run(source, binary, artifact_dir, *, quality_wait=None, sleeper=None, clock=
                 result['stages']['database_delivery'] = {
                     'status': 'delivery_failed',
                     'error': str(exc),
+                    **delivery_diagnostics(getattr(exc, 'diagnostics', {})),
                 }
                 result['database'] = database_gap_report(
                     preflight_report, result['stages']['database_delivery'])
@@ -838,6 +858,7 @@ def run(source, binary, artifact_dir, *, quality_wait=None, sleeper=None, clock=
                 return finalize(artifact_dir, result, 1)
             result['stages']['database_delivery'] = {
                 'status': delivery_report.get('status'),
+                **delivery_diagnostics(delivery_report),
                 'config_status': delivery_report.get('config_status'),
                 'namespace': delivery_report.get('namespace'),
             }

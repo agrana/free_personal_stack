@@ -60,6 +60,10 @@ API_HOST = 'api.vercel.com'
 
 
 class DeliveryError(Exception):
+    def __init__(self, code, diagnostics=None):
+        super().__init__(code)
+        self.diagnostics = dict(diagnostics or {})
+
     def __repr__(self) -> str:
         return f"DeliveryError({str(self)!r})"
 
@@ -893,9 +897,9 @@ def _execute_delivery_core(
                 transport=transport,
             )
         except provider.ProviderError as exc:
-            report = build_report(status=str(exc), namespace=namespace)
+            report = build_report(status=str(exc), namespace=namespace, **exc.diagnostic_fields())
             _maybe_write_artifact(artifact_dir, report)
-            raise DeliveryError(str(exc)) from None
+            raise DeliveryError(str(exc), exc.diagnostic_fields()) from None
 
     effective_ssl = 'disable' if loopback_fixture else sslmode
     sslrootcert = None
@@ -903,9 +907,9 @@ def _execute_delivery_core(
         try:
             sslrootcert = provider.resolve_system_ssl_rootcert()
         except provider.ProviderError as exc:
-            report = build_report(status=str(exc), namespace=namespace)
+            report = build_report(status=str(exc), namespace=namespace, **exc.diagnostic_fields())
             _maybe_write_artifact(artifact_dir, report)
-            raise DeliveryError(str(exc)) from None
+            raise DeliveryError(str(exc), exc.diagnostic_fields()) from None
 
     # Custody inventory (read-only) before any DB mutation or env write.
     try:
@@ -917,9 +921,9 @@ def _execute_delivery_core(
             transport=transport,
         )
     except custody.CustodyError as exc:
-        report = build_report(status=str(exc), namespace=namespace)
+        report = build_report(status=str(exc), namespace=namespace, **exc.diagnostic_fields())
         _maybe_write_artifact(artifact_dir, report)
-        raise DeliveryError(str(exc)) from None
+        raise DeliveryError(str(exc), exc.diagnostic_fields()) from None
 
     if custody_state['status'] == 'recovery_required':
         report = build_report(
@@ -944,9 +948,9 @@ def _execute_delivery_core(
                 transport=transport,
             )
         except provider.ProviderError as exc:
-            report = build_report(status=str(exc), namespace=namespace)
+            report = build_report(status=str(exc), namespace=namespace, **exc.diagnostic_fields())
             _maybe_write_artifact(artifact_dir, report)
-            raise DeliveryError(str(exc)) from None
+            raise DeliveryError(str(exc), exc.diagnostic_fields()) from None
     canaries.append(login.password.value)
 
     roles = mdb.derive_role_names(namespace)
@@ -1128,6 +1132,7 @@ def _execute_delivery_core(
                 )
             except custody.CustodyError as exc:
                 fields = dict(exc.report_fields())
+                fields.update(exc.diagnostic_fields())
                 fields.update({
                     'status': str(exc),
                     'namespace': namespace,
@@ -1142,7 +1147,7 @@ def _execute_delivery_core(
                     fields['vercel_writes'] = 0
                 report = build_report(**fields)
                 _maybe_write_artifact(artifact_dir, report)
-                raise DeliveryError(str(exc)) from None
+                raise DeliveryError(str(exc), exc.diagnostic_fields()) from None
             runtime_created = bool(persisted.get('created'))
             # Re-validate exact readback before creating DB login.
             validated = provider.validate_runtime_conninfo(
