@@ -1,10 +1,28 @@
-![Solution architecture: GitHub Actions coordinates Cloudflare DNS and Vercel deployment, with a conditional Supabase data and authentication connection.](docs/architecture/solution-overview.svg)
-
 # Free Personal Stack
 
-A reusable Next.js template whose required GitHub-only onboarding includes an intended hostname, a Supabase connection, app-scoped schema migrations, deployment, DNS and end-to-end verification. The [onboarding contract and implementation status](docs/end-to-end-onboarding.md) distinguish required outcomes from the currently shipped partial workflows.
+![Solution architecture: GitHub Actions coordinates Cloudflare DNS and Vercel deployment, with a conditional Supabase data and authentication connection.](docs/architecture/solution-overview.svg)
+
+## Onboard your agent
+
+Open your generated repository in your preferred coding agent and use:
+
+```text
+Read AGENTS.md, package.json and docs/secrets-only-launch.md. Inspect Git status
+and preserve existing work. Confirm this is my generated app, not upstream.
+Keep the initial shell database-free. Help me implement my product in small,
+tested steps. Before adding data access, review app-scoped schema ownership,
+RLS, cross-app isolation, auth redirects and migration/backup/recovery plans.
+Keep secret values out of source, logs and chat. Do not bypass disabled legacy
+infrastructure gates. Ask for separate approval before publishing, modifying
+secrets, changing provider resources or applying migrations. Report actual
+verification results and distinguish local tests from live deployment evidence.
+```
+
+Agent instructions and local verification: [AGENTS.md](AGENTS.md).
 
 ## Solution overview
+
+A reusable Next.js template whose required GitHub-only onboarding includes an intended hostname, a Supabase connection, app-scoped schema migrations, deployment, DNS and end-to-end verification. The [onboarding contract and implementation status](docs/end-to-end-onboarding.md) distinguish required outcomes from the currently shipped partial workflows.
 
 - **Cloudflare → Vercel → Supabase** shows hostname resolution, application hosting and the intended application data/authentication connection. Cloudflare uses a DNS-only CNAME; visitors connect directly to Vercel over HTTPS.
 - **GitHub Actions** runs quality checks and coordinates onboarding using repository Secrets and merge-reviewed configuration.
@@ -32,24 +50,6 @@ Configure the intended hostname and authoritative zone in tracked `onboarding.co
 **This quickstart uses Secrets + merge-reviewed config.** Maintainer **Launch app** / **Custom domain** digest workflows remain available. The upstream template is blocked from self-deploying by numeric repository ID. Onboarding is complete only after DNS, HTTPS, the page and exact deployed-revision checks pass at the intended hostname, runtime database access works, schema migrations are applied, and grants and RLS isolation are verified. The Vercel URL is an intermediate deployment result.
 
 See **[Secrets-only launch guide](docs/secrets-only-launch.md)** for shell-stage permissions, team ID, database choices and recovery. Required hostname setup: **[Custom domain](docs/custom-domain.md)**. Maintainer local stub rehearsal (not live): **[New app runbook](docs/new-app-runbook.md)**.
-
-## Onboard your agent
-
-Open your generated repository in your preferred coding agent and use:
-
-```text
-Read AGENTS.md, package.json and docs/secrets-only-launch.md. Inspect Git status
-and preserve existing work. Confirm this is my generated app, not upstream.
-Keep the initial shell database-free. Help me implement my product in small,
-tested steps. Before adding data access, review app-scoped schema ownership,
-RLS, cross-app isolation, auth redirects and migration/backup/recovery plans.
-Keep secret values out of source, logs and chat. Do not bypass disabled legacy
-infrastructure gates. Ask for separate approval before publishing, modifying
-secrets, changing provider resources or applying migrations. Report actual
-verification results and distinguish local tests from live deployment evidence.
-```
-
-Agent instructions and local verification: [AGENTS.md](AGENTS.md).
 
 ## What the initial deployment includes
 
