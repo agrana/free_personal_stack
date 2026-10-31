@@ -33,6 +33,9 @@ OWNERSHIP_COMMENT_PREFIX = 'fps-mdb-runtime'
 class CustodyError(Exception):
     """Custody failure with honest partial-write accounting."""
 
+    _operation: Optional[str] = None
+    _http_status: Optional[int] = None
+
     def __init__(
         self,
         code: str,
@@ -53,6 +56,16 @@ class CustodyError(Exception):
 
     def __repr__(self) -> str:
         return f"CustodyError({str(self)!r})"
+
+    def diagnostic_fields(self) -> Dict[str, Any]:
+        result: Dict[str, Any] = {}
+        operation = getattr(self, '_operation', None)
+        if operation in ('vercel_custody_inventory_get', 'vercel_custody_value_get'):
+            result['provider_operation'] = operation
+            status = getattr(self, '_http_status', None)
+            if type(status) is int and 100 <= status <= 599:
+                result['provider_http_status'] = status
+        return result
 
     def report_fields(self) -> Dict[str, Any]:
         fields: Dict[str, Any] = {
@@ -201,6 +214,7 @@ def _request(
     method: str,
     path: str,
     token: str,
+    operation: str,
     body: Optional[bytes] = None,
     timeout: float = REQUEST_TIMEOUT_SEC,
 ) -> Tuple[int, Any]:
@@ -216,15 +230,24 @@ def _request(
     try:
         status, payload = transport.request(
             method=method, url=url, headers=headers, body=body, timeout=timeout)
-    except CustodyError:
+    except CustodyError as exc:
+        exc._operation = operation
         raise
     except Exception:
-        raise CustodyError('provider_transport_failed') from None
-    if status in (301, 302, 303, 307, 308):
-        raise CustodyError('provider_redirect_rejected')
-    data = None
-    if payload:
-        data = _parse_json(payload)
+        error = CustodyError('provider_transport_failed')
+        error._operation = operation
+        raise error from None
+    try:
+        if status in (301, 302, 303, 307, 308):
+            raise CustodyError('provider_redirect_rejected')
+        data = None
+        if payload:
+            data = _parse_json(payload)
+    except CustodyError as exc:
+        exc._operation = operation
+        if status != 200:
+            exc._http_status = status
+        raise
     return status, data
 
 
@@ -265,15 +288,23 @@ def list_project_envs(
     team_id = _require_team_id(team_id)
     query = urlencode({'teamId': team_id})
     path = f'/v10/projects/{project_id}/env?{query}'
-    status, data = _request(transport, method='GET', path=path, token=token)
+    status, data = _request(transport, method='GET', path=path, token=token,
+                            operation='vercel_custody_inventory_get')
     if status != 200:
-        raise CustodyError(_map_http_status(status))
-    if not isinstance(data, dict):
-        raise CustodyError('env_inventory_invalid')
-    envs = data.get('envs')
-    if not isinstance(envs, list):
-        raise CustodyError('env_inventory_invalid')
-    return [_normalize_record(row) for row in envs if isinstance(row, dict)]
+        error = CustodyError(_map_http_status(status))
+        error._operation = 'vercel_custody_inventory_get'
+        error._http_status = status
+        raise error
+    try:
+        if not isinstance(data, dict):
+            raise CustodyError('env_inventory_invalid')
+        envs = data.get('envs')
+        if not isinstance(envs, list):
+            raise CustodyError('env_inventory_invalid')
+        return [_normalize_record(row) for row in envs if isinstance(row, dict)]
+    except CustodyError as exc:
+        exc._operation = 'vercel_custody_inventory_get'
+        raise
 
 
 def get_env_value(
@@ -289,15 +320,23 @@ def get_env_value(
     env_id = _require_env_id(env_id)
     query = urlencode({'teamId': team_id})
     path = f'/v1/projects/{project_id}/env/{env_id}?{query}'
-    status, data = _request(transport, method='GET', path=path, token=token)
+    status, data = _request(transport, method='GET', path=path, token=token,
+                            operation='vercel_custody_value_get')
     if status != 200:
-        raise CustodyError(_map_http_status(status))
-    if not isinstance(data, dict):
-        raise CustodyError('env_value_invalid')
-    value = data.get('value')
-    if not isinstance(value, str) or not value:
-        raise CustodyError('env_value_unreadable')
-    return _Secret(value)
+        error = CustodyError(_map_http_status(status))
+        error._operation = 'vercel_custody_value_get'
+        error._http_status = status
+        raise error
+    try:
+        if not isinstance(data, dict):
+            raise CustodyError('env_value_invalid')
+        value = data.get('value')
+        if not isinstance(value, str) or not value:
+            raise CustodyError('env_value_unreadable')
+        return _Secret(value)
+    except CustodyError as exc:
+        exc._operation = 'vercel_custody_value_get'
+        raise
 
 
 def find_runtime_env(records: Sequence[EnvRecord]) -> Optional[EnvRecord]:
@@ -550,11 +589,14 @@ def persist_runtime_env(
         except CustodyError as exc:
             if exc.custody_completion == 'uncertain' or exc.vercel_writes_attempted > 0:
                 raise
-            raise _uncertain_after_create_attempt(
+            error = _uncertain_after_create_attempt(
                 str(exc),
                 env_id=created.env_id,
                 checkpoint=checkpoint,
-            ) from None
+            )
+            error._operation = exc._operation
+            error._http_status = exc._http_status
+            raise error from None
     except CustodyError:
         raise
     except Exception:

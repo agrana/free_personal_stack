@@ -1430,7 +1430,12 @@ class OrchestratorShellAndTimeoutTests(unittest.TestCase):
             @staticmethod
             def run_for_merge(*a, **k):
                 order.append(('delivery', 'failed'))
-                return {'status': 'recovery_required', 'namespace': 'merge_app'}
+                exc = FakeDelivery.DeliveryError('provider_transport_failed')
+                exc.diagnostics = {'provider_operation': 'supabase_cli_login_post',
+                                   'cli_login_mutation_possible': True,
+                                   'provider_http_status': 503,
+                                   'body': 'private-canary'}
+                raise exc
 
         real_load = orch.load
 
@@ -1455,6 +1460,11 @@ class OrchestratorShellAndTimeoutTests(unittest.TestCase):
         result = json.loads((self.artifacts / 'merge-onboarding-result.json').read_text())
         self.assertEqual(code, 1)
         self.assertEqual(result['status'], 'database_delivery_failed')
+        self.assertEqual(result['stages']['database_delivery'], {
+            'status': 'delivery_failed', 'error': 'provider_transport_failed',
+            'provider_operation': 'supabase_cli_login_post',
+            'provider_http_status': 503, 'cli_login_mutation_possible': True})
+        self.assertNotIn('private-canary', json.dumps(result))
         self.assertEqual(result['stages']['provider_writes'], 'blocked')
         self.assertEqual(order, [('launch-app.py', 'enroll'), ('delivery', 'failed')])
 

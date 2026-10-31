@@ -19,6 +19,7 @@ import tempfile
 import time
 import traceback
 import unittest
+from unittest.mock import patch
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
@@ -273,6 +274,149 @@ class DeliveryConfigTests(unittest.TestCase):
             )
             self.assertEqual(loaded["config_status"], "unconfigured")
             self.assertIs(loaded["enabled"], False)
+
+
+class ProviderDiagnosticsTests(unittest.TestCase):
+    def test_delivery_artifact_exact_contents(self):
+        pooler_path = '/v1/projects/abc/config/database/pooler'
+        inventory_path = '/v10/projects/prj_abc/env'
+        login_path = '/v1/projects/abc/cli/login-role'
+        value_path = '/v1/projects/prj_abc/env/env123'
+        for stage in ('pooler', 'inventory', 'value', 'login', 'login_timeout'):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as tmp:
+                record = {'id': 'env123', 'key': custody.RUNTIME_ENV_KEY, 'type': 'encrypted',
+                          'target': ['production'], 'comment': custody.ownership_comment(
+                              custody.EnvBinding('123', 'abc', 'app', 'prj_abc'))}
+                responses = {
+                    ('GET', pooler_path): (400, b'private-body-canary'),
+                    ('GET', inventory_path): (400, b'{"private":"canary"}') if stage == 'inventory' else
+                        (200, json.dumps({'envs': [record] if stage == 'value' else []}).encode()),
+                    ('GET', value_path): (400, b'{"private":"canary"}'),
+                    ('POST', login_path): (400, b'private-body-canary'),
+                }
+                class T(FakeTransport):
+                    def request(self, **kwargs):
+                        if stage == 'login_timeout' and kwargs['method'] == 'POST':
+                            self.calls.append({'method': 'POST'})
+                            raise RuntimeError('private-body-canary')
+                        return super().request(**kwargs)
+                tr = T(responses)
+                modules = {'managed_database': mdb, 'supabase_management_database': provider,
+                           'vercel_env_custody': custody, 'database-delivery-config': cfg}
+                expected_operation = {'pooler': 'supabase_pooler_get',
+                                      'inventory': 'vercel_custody_inventory_get',
+                                      'value': 'vercel_custody_value_get',
+                                      'login': 'supabase_cli_login_post',
+                                      'login_timeout': 'supabase_cli_login_post'}[stage]
+                expected_status = 'provider_transport_failed' if stage == 'login_timeout' else 'provider_http_error'
+                fields: Dict[str, Any] = {'provider_operation': expected_operation}
+                if stage != 'login_timeout':
+                    fields['provider_http_status'] = 400
+                if stage.startswith('login'):
+                    fields['cli_login_mutation_possible'] = True
+                with patch.object(delivery, 'load', side_effect=modules.__getitem__), \
+                     patch.object(cfg, 'capture_approved_migrations', return_value=[]), \
+                     patch.object(mdb, 'migrations_from_captured_manifest', return_value=[]):
+                    with self.assertRaises(delivery.DeliveryError) as ctx:
+                        delivery._execute_delivery_core(
+                            source=Path(tmp), config={'namespace': 'app', 'migrations_path': 'migrations',
+                                                      'expected_project_ref': 'abc'},
+                            expected_sha=None, env={'SUPABASE_URL': 'https://abc.supabase.co',
+                                'SUPABASE_ACCESS_TOKEN': 'private-canary', 'VERCEL_API_TOKEN': 'private-canary',
+                                'VERCEL_TEAM_ID': 'team_abc'}, transport=tr,
+                            vercel_project_id='prj_abc', repository_id='123', connect_fn=None,
+                            artifact_dir=Path(tmp), sslmode='disable', loopback_fixture=True,
+                            pooler_override=None if stage == 'pooler' else object(),
+                            cli_login_override=None, provisioner_role='postgres')
+                self.assertEqual(str(ctx.exception), expected_status)
+                self.assertEqual(ctx.exception.diagnostics, fields)
+                text = (Path(tmp) / 'database-delivery-result.json').read_text()
+                self.assertEqual(json.loads(text), delivery.build_report(status=expected_status, namespace='app', **fields))
+                self.assertNotIn('canary', text)
+                self.assertNotIn('https://', text)
+                self.assertEqual(len(tr.calls), 1 if stage in ('pooler', 'inventory') else 2)
+
+    def test_http_diagnostics(self):
+        cases = [
+            ("pooler", "supabase_pooler_get", False),
+            ("inventory", "vercel_custody_inventory_get", False),
+            ("value", "vercel_custody_value_get", False),
+            ("login", "supabase_cli_login_post", True),
+        ]
+        for case, operation, mutation in cases:
+            for status in (301, 302, 303, 307, 308, 400, 403, 429, 503):
+                with self.subTest(case=case, status=status):
+                    paths = {"pooler": "/v1/projects/abc/config/database/pooler", "inventory": "/v10/projects/prj_abc/env", "value": "/v1/projects/prj_abc/env/env123", "login": "/v1/projects/abc/cli/login-role"}
+                    tr = FakeTransport({("POST" if mutation else "GET", paths[case]): (status, b'{"private":"canary"}')})
+                    with self.assertRaises((provider.ProviderError, custody.CustodyError)) as ctx:
+                        if case == "pooler":
+                            provider.fetch_primary_session_pooler(project_ref="abc", access_token="canary", transport=tr)
+                        elif case == "login":
+                            provider.create_cli_login_role(project_ref="abc", access_token="canary", transport=tr)
+                        elif case == "inventory":
+                            custody.list_project_envs(project_id="prj_abc", team_id="team_abc", token="canary", transport=tr)
+                        else:
+                            custody.get_env_value(project_id="prj_abc", env_id="env123", team_id="team_abc", token="canary", transport=tr)
+                    expected = {"provider_operation": operation, "provider_http_status": status}
+                    if mutation:
+                        expected["cli_login_mutation_possible"] = True
+                    self.assertEqual(ctx.exception.diagnostic_fields(), expected)
+                    if status in (301, 302, 303, 307, 308):
+                        self.assertEqual(str(ctx.exception), 'provider_redirect_rejected')
+                    self.assertNotIn("canary", repr(ctx.exception.diagnostic_fields()))
+                    self.assertEqual(len(tr.calls), 1)
+
+    def test_malformed_success_gets_operation_without_body(self):
+        for case, operation, path in (
+            ('pooler', 'supabase_pooler_get', '/v1/projects/abc/config/database/pooler'),
+            ('inventory', 'vercel_custody_inventory_get', '/v10/projects/prj_abc/env'),
+            ('value', 'vercel_custody_value_get', '/v1/projects/prj_abc/env/env123'),
+        ):
+            for body in (b'private-canary', b'{}'):
+                with self.subTest(case=case, body=body):
+                    tr = FakeTransport({('GET', path): (200, body)})
+                    with self.assertRaises((provider.ProviderError, custody.CustodyError)) as ctx:
+                        if case == 'pooler':
+                            provider.fetch_primary_session_pooler(project_ref='abc', access_token='canary', transport=tr)
+                        elif case == 'inventory':
+                            custody.list_project_envs(project_id='prj_abc', team_id='team_abc', token='canary', transport=tr)
+                        else:
+                            custody.get_env_value(project_id='prj_abc', env_id='env123', team_id='team_abc', token='canary', transport=tr)
+                    self.assertEqual(ctx.exception.diagnostic_fields(), {'provider_operation': operation})
+                    self.assertNotIn('canary', str(ctx.exception))
+
+    def test_post_transport_and_invalid_response_are_uncertain(self):
+        for response in (None, (201, b"invalid-canary"), (200, b'{}'),
+                         (201, b'[' * 2000 + b']' * 2000)):
+            with self.subTest(response=response):
+                class T:
+                    calls = 0
+                    def request(self, **kwargs):
+                        self.calls += 1
+                        if response is None:
+                            raise RuntimeError("private-canary")
+                        return response
+                tr = T()
+                with self.assertRaises(provider.ProviderError) as ctx:
+                    provider.create_cli_login_role(project_ref="abc", access_token="canary", transport=tr)
+                self.assertEqual(ctx.exception.diagnostic_fields(), {"provider_operation": "supabase_cli_login_post", "cli_login_mutation_possible": True})
+                self.assertEqual(tr.calls, 1)
+
+    def test_preflight_failures_are_not_mutation_attempts_and_fields_are_allowlisted(self):
+        tr = FakeTransport({})
+        with self.assertRaises(provider.ProviderError) as ctx:
+            provider.create_cli_login_role(project_ref='abc', access_token='', transport=tr)
+        self.assertEqual(ctx.exception.diagnostic_fields(), {})
+        self.assertEqual(tr.calls, [])
+        for error in (provider.ProviderError('x'), custody.CustodyError('x')):
+            error._operation = 'private-canary'
+            error._http_status = 400
+            self.assertEqual(error.diagnostic_fields(), {})
+            error._operation = ('supabase_pooler_get' if isinstance(error, provider.ProviderError)
+                                else 'vercel_custody_inventory_get')
+            for status in (True, '400', 999, -1):
+                error._http_status = status
+                self.assertEqual(error.diagnostic_fields(), {'provider_operation': error._operation})
 
 
 class ProviderTransportTests(unittest.TestCase):
