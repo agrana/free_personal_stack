@@ -19,7 +19,8 @@ import tempfile
 import time
 import traceback
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from types import SimpleNamespace
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
@@ -188,6 +189,17 @@ def git_init_commit(source: Path) -> str:
 
 
 class DeliveryConfigTests(unittest.TestCase):
+    def test_bootstrap_mode_optional_closed_enum(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = json.loads(write_delivery_config(Path(tmp)).read_text())
+            self.assertEqual(cfg.validate_mapping(raw)['bootstrap_mode'], 'temporary_login')
+            raw['bootstrap_mode'] = 'existing_secret'
+            self.assertEqual(cfg.validate_mapping(raw)['bootstrap_mode'], 'existing_secret')
+            for bad in (None, True, [], {}, 'automatic', 'existing-secret'):
+                raw['bootstrap_mode'] = bad
+                with self.assertRaises(cfg.ConfigError):
+                    cfg.validate_mapping(raw)
+
     def test_template_defaults_disabled(self):
         raw = json.loads(
             (ROOT / "database-delivery.config.json").read_text(encoding="utf-8")
@@ -202,6 +214,23 @@ class DeliveryConfigTests(unittest.TestCase):
             self.assertIs(validated["enabled"], False)
             self.assertIs(validated["auto_apply"], False)
             self.assertIsNone(validated["namespace"])
+
+    def test_existing_mode_requires_only_fixed_extra_secret_and_binds_digest(self):
+        env = {name: _gen_secret(name) for name in delivery.DELIVERY_SECRETS}
+        self.assertEqual(delivery.missing_delivery_secrets(env), [])
+        for missing in (None, '', 'SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE'):
+            candidate = dict(env)
+            if missing is not None:
+                candidate[delivery.BOOTSTRAP_ENV_KEY] = missing
+            self.assertEqual(delivery.missing_delivery_secrets(candidate,
+                bootstrap_mode='existing_secret'), [delivery.BOOTSTRAP_ENV_KEY])
+        config = {'namespace': 'app'}
+        args = dict(repository_id='123', vercel_project_id='prj_abc', source_sha='a' * 40)
+        default = delivery.compute_delivery_binding_digest(config=config, **args)
+        explicit = delivery.compute_delivery_binding_digest(config=dict(config, bootstrap_mode='temporary_login'), **args)
+        existing = delivery.compute_delivery_binding_digest(config=dict(config, bootstrap_mode='existing_secret'), **args)
+        self.assertEqual(default, explicit)
+        self.assertNotEqual(default, existing)
 
     def test_closed_schema_rejects_unknown_and_auto_apply_without_enabled(self):
         with self.assertRaises(cfg.ConfigError) as ctx:
@@ -277,6 +306,64 @@ class DeliveryConfigTests(unittest.TestCase):
 
 
 class ProviderDiagnosticsTests(unittest.TestCase):
+    def test_existing_secret_fails_closed_without_cli_or_connection(self):
+        from psycopg.conninfo import make_conninfo
+        target = provider.SessionPoolerTarget('abc', 'aws-0-eu-west-1.pooler.supabase.com', 5432, 'postgres', 'abc')
+        canary = _gen_secret('invalid')
+        good = dict(host=target.host, port='5432', dbname='postgres', user='postgres.abc', password=canary)
+        for supplied in ('', 'SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE', canary,
+                         make_conninfo(**dict(good, options='-c role=postgres')),
+                         make_conninfo(**dict(good, user='postgres.other'))):
+            with self.subTest(supplied_length=len(supplied)), tempfile.TemporaryDirectory() as tmp:
+                modules = {'managed_database': mdb, 'supabase_management_database': provider,
+                           'vercel_env_custody': custody, 'database-delivery-config': cfg}
+                tr = FakeTransport({})
+                with patch.object(delivery, 'load', side_effect=modules.__getitem__), \
+                     patch.object(cfg, 'capture_approved_migrations', return_value=[]), \
+                     patch.object(provider, 'create_cli_login_role') as login, \
+                     patch.object(delivery, 'connect_with_retries') as connect:
+                    with self.assertRaises(delivery.DeliveryError) as caught:
+                        delivery.execute_delivery(
+                            source=Path(tmp), config={'namespace': 'app', 'migrations_path': 'migrations',
+                                'expected_project_ref': 'abc', 'bootstrap_mode': 'existing_secret'},
+                            env={'SUPABASE_URL': 'https://abc.supabase.co', delivery.BOOTSTRAP_ENV_KEY: supplied},
+                            transport=tr, vercel_project_id='prj_abc', repository_id='123',
+                            artifact_dir=Path(tmp), pooler_override=target, allow_test_orchestration=True)
+                    login.assert_not_called()
+                    connect.assert_not_called()
+                self.assertEqual(tr.calls, [])
+                text = ''.join(p.read_text() for p in Path(tmp).glob('*.json'))
+                self.assertNotIn(canary, text + ''.join(traceback.format_exception(caught.exception)))
+
+    def test_bootstrap_secret_stripped_from_every_child(self):
+        canary = _gen_secret('child')
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {delivery.BOOTSTRAP_ENV_KEY: canary}):
+            def run(args, **kwargs):
+                self.assertNotIn(delivery.BOOTSTRAP_ENV_KEY, kwargs['env'])
+                self.assertNotIn(canary, repr(args))
+                return subprocess.CompletedProcess(args, 0, '{}\n', '')
+            with patch.object(orch.subprocess, 'run', side_effect=run) as child:
+                for script in ('launch-app.py', 'custom-domain.py', 'verify-auth.py'):
+                    orch.run_python_script(script, Path(tmp), 'vercel', [],
+                        {delivery.BOOTSTRAP_ENV_KEY: canary}, tmp)
+                self.assertEqual(child.call_count, 3)
+            self.assertEqual(os.environ[delivery.BOOTSTRAP_ENV_KEY], canary)
+            # Exercise actual exec and an actual descendant, not just mocks.
+            probe = Path(tmp) / 'launch-app.py'
+            probe.write_text('''import json, os, subprocess, sys
+key = 'MDB_BOOTSTRAP_DATABASE_URL'
+assert key not in os.environ
+child = subprocess.run([sys.executable, '-c',
+    "import os; assert 'MDB_BOOTSTRAP_DATABASE_URL' not in os.environ"], check=True)
+print(json.dumps({'status': 'child_environment_clean'}))
+''')
+            with patch.object(orch, '__file__', str(Path(tmp) / 'merge-onboarding.py')):
+                code, events, stdout, stderr = orch.run_python_script(
+                    'launch-app.py', Path(tmp), 'vercel', [], {}, tmp)
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(events[-1]['status'], 'child_environment_clean')
+            self.assertNotIn(canary, stdout + stderr)
+
     def test_delivery_artifact_exact_contents(self):
         pooler_path = '/v1/projects/abc/config/database/pooler'
         inventory_path = '/v10/projects/prj_abc/env'
@@ -335,6 +422,120 @@ class ProviderDiagnosticsTests(unittest.TestCase):
                 self.assertNotIn('canary', text)
                 self.assertNotIn('https://', text)
                 self.assertEqual(len(tr.calls), 1 if stage in ('pooler', 'inventory') else 2)
+
+    def test_unexpected_bootstrap_errors_preserve_partial_write_checkpoints(self):
+        self._assert_partial_write_checkpoints(typed=False)
+
+    def test_normalized_bootstrap_errors_preserve_partial_write_checkpoints(self):
+        self._assert_partial_write_checkpoints(typed=True)
+
+    def _assert_partial_write_checkpoints(self, *, typed):
+        modules = {'managed_database': mdb, 'supabase_management_database': provider,
+                   'vercel_env_custody': custody, 'database-delivery-config': cfg}
+        stages = ('provision_dispatch', 'migrator_rotation') if typed else (
+            'catalog', 'custody_dispatch', 'readback_validation',
+            'provision_dispatch', 'migrator_rotation')
+        expected_status = mdb.FailureCode.INTERNAL if typed else 'database_bootstrap_failed'
+        for stage in stages:
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as tmp:
+                secret = _gen_secret('unexpected-driver-secret')
+                dsn = 'postgresql://postgres.abc:' + secret + '@private.invalid/postgres'
+                unexpected = mdb.ManagedDatabaseError(expected_status, dsn) if typed else RuntimeError(dsn)
+                credentials = SimpleNamespace(conninfo=dsn, password=SimpleNamespace(value=secret))
+                target = provider.SessionPoolerTarget(
+                    'abc', 'aws-0-eu-west-1.pooler.supabase.com', 5432, 'postgres', 'abc')
+                conn = Mock()
+                connector = Mock(return_value=conn)
+                tr = FakeTransport({})
+                with patch.object(delivery, 'load', side_effect=modules.__getitem__), \
+                     patch.object(cfg, 'capture_approved_migrations', return_value=[]), \
+                     patch.object(mdb, 'migrations_from_captured_manifest', return_value=[]), \
+                     patch.object(provider, 'resolve_system_ssl_rootcert', return_value='/safe/root.crt'), \
+                     patch.object(provider, 'build_psycopg_dsn', return_value=dsn), \
+                     patch.object(provider, 'validate_existing_bootstrap_conninfo', return_value=credentials), \
+                     patch.object(provider, 'create_cli_login_role') as cli, \
+                     patch.object(custody, 'inspect_runtime_custody', return_value={'status': 'absent'}), \
+                     patch.object(delivery, 'assume_trusted_provisioner'), \
+                     patch.object(mdb, 'inspect_app_catalog_state',
+                         side_effect=unexpected if stage == 'catalog' else None,
+                         return_value=SimpleNamespace(status='absent')), \
+                     patch.object(custody, 'persist_runtime_env',
+                         side_effect=unexpected if stage == 'custody_dispatch' else None,
+                         return_value={'created': True, 'value': SimpleNamespace(value=dsn)}) as persist, \
+                     patch.object(provider, 'validate_runtime_conninfo',
+                         side_effect=unexpected if stage == 'readback_validation' else None,
+                         return_value=credentials) as validate, \
+                     patch.object(mdb, 'provision_app',
+                         side_effect=unexpected if stage == 'provision_dispatch' else None,
+                         return_value=SimpleNamespace(created=False)) as provision, \
+                     patch.object(mdb, 'set_owned_login_password', side_effect=unexpected) as rotate, \
+                     patch.object(mdb, 'migrate_app') as migrate:
+                    try:
+                        delivery._execute_delivery_core(
+                            source=Path(tmp), config={'namespace': 'app', 'migrations_path': 'migrations',
+                                'expected_project_ref': 'abc', 'bootstrap_mode': 'existing_secret',
+                                'rotate_migrator': True}, expected_sha=None,
+                            env={'SUPABASE_URL': 'https://abc.supabase.co',
+                                'SUPABASE_ACCESS_TOKEN': secret, 'VERCEL_API_TOKEN': secret,
+                                'VERCEL_TEAM_ID': 'team_abc', delivery.BOOTSTRAP_ENV_KEY: dsn},
+                            transport=tr, vercel_project_id='prj_abc', repository_id='123',
+                            connect_fn=connector, artifact_dir=Path(tmp), sslmode='verify-full',
+                            loopback_fixture=False, pooler_override=target, cli_login_override=None,
+                            provisioner_role='postgres')
+                    except delivery.DeliveryError as exc:
+                        self.assertEqual(str(exc), expected_status)
+                        self.assertIsNone(exc.__cause__)
+                        self.assertTrue(exc.__suppress_context__)
+                        rendered = ''.join(traceback.format_exception(exc))
+                    else:
+                        self.fail('unexpected driver failure was not surfaced')
+                    cli.assert_not_called()
+                    migrate.assert_not_called()
+                    conn.close.assert_called_once_with()
+                    connector.assert_called_once_with(dsn)
+                    self.assertEqual(tr.calls, [])
+                    text = (Path(tmp) / 'database-delivery-result.json').read_text()
+                    self.assertNotIn(secret, text + rendered)
+                    self.assertNotIn(dsn, text + rendered)
+                    report = json.loads(text)
+                    self.assertEqual(report['status'], expected_status)
+                    self.assertFalse(report['database_ready'])
+                    self.assertFalse(report['full_app_ready'])
+                    attempted = stage != 'catalog'
+                    persisted = stage not in ('catalog', 'custody_dispatch')
+                    db_attempted = stage in ('provision_dispatch', 'migrator_rotation')
+                    self.assertEqual(report['runtime_env_write_attempted'], attempted)
+                    for field in ('runtime_env_persisted', 'runtime_env_created'):
+                        self.assertEqual(report[field], None if stage == 'custody_dispatch' else persisted)
+                    self.assertEqual(report['database_mutation_attempted'], db_attempted)
+                    self.assertEqual(report['database_mutation_completion'],
+                                     'uncertain' if db_attempted else 'not_attempted')
+                    expected_order = ['existing_secret', 'provisioner_connect', 'catalog_probe']
+                    if attempted:
+                        expected_order.append('custody_persist')
+                    if db_attempted:
+                        expected_order.append('provision_or_verify')
+                    if stage == 'migrator_rotation':
+                        expected_order.append('migrator_rotate')
+                        self.assertIs(report['provision_created'], False)
+                    else:
+                        self.assertNotIn('provision_created', report)
+                    self.assertEqual(report['call_order'], expected_order)
+                    for field in ('password_writes', 'ddl_writes'):
+                        if db_attempted:
+                            self.assertNotIn(field, report)
+                        else:
+                            self.assertEqual(report[field], 0)
+                    if attempted:
+                        self.assertNotIn('vercel_writes', report)
+                    else:
+                        self.assertEqual(report['vercel_writes'], 0)
+                    self.assertEqual(persist.call_count, int(attempted))
+                    self.assertEqual(validate.call_count, int(persisted))
+                    self.assertEqual(provision.call_count, int(db_attempted))
+                    self.assertEqual(rotate.call_count, int(stage == 'migrator_rotation'))
+                    if stage == 'migrator_rotation':
+                        self.assertEqual(rotate.call_args.kwargs['role_kind'], 'migrator')
 
     def test_http_diagnostics(self):
         cases = [
@@ -420,6 +621,48 @@ class ProviderDiagnosticsTests(unittest.TestCase):
 
 
 class ProviderTransportTests(unittest.TestCase):
+    def test_existing_bootstrap_binding_and_tls(self):
+        from psycopg.conninfo import make_conninfo, conninfo_to_dict
+        target = provider.SessionPoolerTarget('abc', 'aws-0-eu-west-1.pooler.supabase.com', 5432, 'postgres', 'abc')
+        password = _gen_secret('existing') + " '@:/?#\\"
+        fields = dict(host=target.host, port='5432', dbname='postgres', user='postgres.abc', password=password)
+        for sslmode in (None, 'require', 'verify-ca', 'verify-full'):
+            supplied = dict(fields)
+            if sslmode:
+                supplied['sslmode'] = sslmode
+            validated = provider.validate_existing_bootstrap_conninfo(make_conninfo(**supplied), target=target)
+            parsed = conninfo_to_dict(validated.conninfo)
+            self.assertEqual(parsed['password'], password)
+            self.assertEqual(parsed['sslmode'], 'verify-full')
+            self.assertEqual(parsed['sslrootcert'], provider.resolve_system_ssl_rootcert())
+            self.assertNotIn(password, repr(validated))
+        uri = f'postgresql://postgres.abc:{quote(password, safe="")}@{target.host}:5432/postgres?sslmode=require'
+        self.assertEqual(provider.validate_existing_bootstrap_conninfo(uri, target=target).password.value, password)
+        system = provider.validate_existing_bootstrap_conninfo(
+            make_conninfo(**dict(fields, sslrootcert='system')), target=target)
+        self.assertEqual(system.sslrootcert, provider.resolve_system_ssl_rootcert())
+        with patch.object(provider, 'resolve_system_ssl_rootcert', side_effect=provider.ProviderError('system_ca_unavailable')):
+            with self.assertRaises(provider.ProviderError):
+                provider.validate_existing_bootstrap_conninfo(uri, target=target)
+        for key, value in (
+            ('host', target.host + '.evil.test'), ('host', 'db.abc.supabase.co'),
+            ('host', target.host + ',' + target.host), ('hostaddr', '127.0.0.1'),
+            ('port', '6543'), ('dbname', 'other'), ('user', 'postgres.other'),
+            ('user', 'other.abc'), ('options', '-c role=postgres'), ('service', 'evil'),
+            ('sslmode', 'disable'), ('sslmode', 'prefer'), ('sslmode', 'allow'),
+            ('sslrootcert', '/arbitrary/ca.pem'), ('sslcert', '/arbitrary/client.pem'),
+            ('password', ''), ('password', '[YOUR-PASSWORD]'),
+            ('password', 'SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE'),
+        ):
+            with self.subTest(key=key, value=value):
+                bad = dict(fields, **{key: value})
+                with self.assertRaises(provider.ProviderError) as caught:
+                    provider.validate_existing_bootstrap_conninfo(make_conninfo(**bad), target=target)
+                self.assertNotIn(password, str(caught.exception))
+        for bad in ('', 'not a dsn ' + password, 'SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE'):
+            with self.assertRaises(provider.ProviderError):
+                provider.validate_existing_bootstrap_conninfo(bad, target=target)
+
     def test_cli_login_normalizes_and_redacts(self):
         password = _gen_secret("cli")
         body = json.dumps(
@@ -1854,6 +2097,109 @@ class DeliveryPgIntegrationTests(unittest.TestCase):
                     provisioner_connection=conn,
                 )
         self.assertEqual(ctx.exception.code, mdb.FailureCode.AUTH_DENIED)
+
+    def test_existing_secret_real_restricted_bootstrap_and_migration(self):
+        """Only the connector maps validated provider identities to disposable PG.
+
+        Production parsing/TLS remains strict; no real provider DNS/DB contact.
+        All provisioning/migration SQL executes as real non-superuser logins.
+        """
+        import psycopg
+        from psycopg.conninfo import conninfo_to_dict, make_conninfo
+        ref = 'existingref0001'
+        target = provider.SessionPoolerTarget(ref, 'aws-0-eu-west-1.pooler.supabase.com', 5432, 'mdb', ref)
+        stored = {'envs': []}
+        inner = self._custody_transport(stored)
+        calls = []
+        class Transport:
+            def request(inner_self, **kw):
+                calls.append((kw['method'], kw['url']))
+                self.assertNotIn('/cli/login-role', kw['url'])
+                self.assertNotIn(self.direct_password, (kw.get('body') or b'').decode())
+                if kw['url'].endswith('/config/database/pooler'):
+                    return 200, json.dumps([{'database_type': 'PRIMARY', 'db_name': 'mdb',
+                        'connection_string': f'postgresql://postgres.{ref}:[YOUR-PASSWORD]@{target.host}:6543/mdb'}]).encode()
+                return inner.request(**kw)
+        identities = []
+        def connect(dsn):
+            parsed = conninfo_to_dict(dsn)
+            self.assertEqual(parsed['sslmode'], 'verify-full')
+            self.assertEqual(parsed['host'], target.host)
+            user = parsed['user'].removesuffix('.' + ref)
+            if user == 'postgres':
+                user = 'mdb_direct_prov'
+            conn = psycopg.connect(_dsn(user, parsed['password'], self.port), autocommit=True)
+            identities.append(conn.execute('SELECT current_user').fetchone()[0])
+            return conn
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mig = root / 'migrations'
+            mig.mkdir()
+            (mig / '0001_items.sql').write_text('''
+CREATE TABLE items (owner_id uuid NOT NULL, note text);
+ALTER TABLE items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE items FORCE ROW LEVEL SECURITY;
+CREATE POLICY own_items ON items TO existing_flow_runtime
+ USING (owner_id = nullif(current_setting('request.jwt.claim.sub', true), '')::uuid)
+ WITH CHECK (owner_id = nullif(current_setting('request.jwt.claim.sub', true), '')::uuid);
+GRANT SELECT, INSERT, UPDATE, DELETE ON items TO existing_flow_runtime;
+''')
+            write_delivery_config(root, enabled=True, auto_apply=True, namespace='existing_flow',
+                migrations_path='migrations', expected_project_ref=ref, bootstrap_mode='existing_secret')
+            sha = git_init_commit(root)
+            config = cfg.load_database_delivery_config(root, expected_sha=sha)
+            secret = make_conninfo(host=target.host, port='5432', dbname='mdb',
+                user='postgres.' + ref, password=self.direct_password, sslmode='require')
+            env = {'SUPABASE_URL': f'https://{ref}.supabase.co', 'SUPABASE_ACCESS_TOKEN': _gen_secret('mgmt'),
+                'VERCEL_API_TOKEN': _gen_secret('vercel'), 'VERCEL_TEAM_ID': 'team_existing',
+                delivery.BOOTSTRAP_ENV_KEY: secret}
+            kwargs = dict(source=root, config=config, env=env, transport=Transport(),
+                vercel_project_id='prj_existing', repository_id='1000000099', connect_fn=connect,
+                provisioner_role='mdb_direct_prov', allow_test_orchestration=True,
+                expected_sha=sha, artifact_dir=root / 'artifacts')
+            report = delivery.execute_delivery(**kwargs)
+            self.assertEqual(report['status'], 'delivery_completed_local_runtime_proof')
+            self.assertEqual(report['bootstrap_mode'], 'existing_secret')
+            self.assertIsNone(report['cli_login_ttl_seconds'])
+            self.assertEqual(report['migrations_applied'], 1)
+            self.assertEqual(identities, ['mdb_direct_prov', 'existing_flow_migrator', 'existing_flow_runtime'])
+            proof = delivery._prove_runtime_local_isolation(runtime_dsn=stored['envs'][0]['value'],
+                connector=connect, namespace='existing_flow', roles=mdb.derive_role_names('existing_flow'),
+                allow_fixture_crud=True, second_namespace=None)
+            self.assertTrue(proof['own_user_crud'])
+            self.assertEqual(proof['cross_user_denied_sqlstates'], ['42501', '42501'])
+            self.assertNotIn(self.direct_password, json.dumps(stored))
+            text = json.dumps(report) + ''.join(p.read_text() for p in (root / 'artifacts').glob('*.json'))
+            self.assertNotIn(secret, text)
+            self.assertNotIn(self.direct_password, text)
+            with psycopg.connect(self.direct_url, autocommit=True) as conn:
+                self.assertEqual(conn.execute('SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname=current_user').fetchone(), (False, False))
+            with psycopg.connect(self.admin_url, autocommit=True) as conn:
+                self.assertEqual(conn.execute('SELECT count(*) FROM existing_flow.items').fetchone()[0], 0)
+
+            # Real authentication failure and real denied delegation stay safe,
+            # with no credential reset, CLI call, DDL or custody write.
+            for failure in ('password', 'delegation'):
+                wrong = _gen_secret('wrong')
+                failed_env = dict(env)
+                failed_kwargs = dict(kwargs)
+                if failure == 'password':
+                    failed_env[delivery.BOOTSTRAP_ENV_KEY] = make_conninfo(
+                        host=target.host, port='5432', dbname='mdb', user='postgres.' + ref,
+                        password=wrong)
+                else:
+                    failed_kwargs['provisioner_role'] = 'mdb_trusted'
+                failed_kwargs['env'] = failed_env
+                before = len(calls)
+                with self.assertRaises(delivery.DeliveryError) as caught:
+                    delivery.execute_delivery(**failed_kwargs)
+                self.assertEqual(str(caught.exception),
+                    'database_auth_failed' if failure == 'password' else 'database_bootstrap_failed')
+                self.assertTrue(all(method == 'GET' for method, _url in calls[before:]))
+                failure_text = ''.join(traceback.format_exception(caught.exception))
+                failure_text += ''.join(p.read_text() for p in (root / 'artifacts').glob('*.json'))
+                for private in (wrong, secret, self.direct_password):
+                    self.assertNotIn(private, failure_text)
 
     def _custody_transport(self, stored: Dict[str, Any]):
         class CustodyTransport:

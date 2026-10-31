@@ -24,6 +24,53 @@ automatic production apply in the template.
 routine DB/RLS authority. Workflow `GITHUB_TOKEN` cannot persist repository
 Secrets.
 
+### Explicit existing-credential bootstrap (opt-in recovery path)
+
+`bootstrap_mode` is a closed reviewed enum: `temporary_login` (default, also
+when omitted by older generated repositories) or `existing_secret`. The template
+remains disabled and defaults to `temporary_login`. To opt in, store the existing
+credential under the fixed repository Secret **`MDB_BOOTSTRAP_DATABASE_URL`** and
+merge a reviewed delivery config with `bootstrap_mode: "existing_secret"` alongside
+the normal enabled/auto-apply/namespace/migrations/project binding. Never put the
+value in config, a command, a PR, logs or chat. The existing Management token is
+still needed for authenticated PRIMARY pooler discovery (`database_pooling_config_read`);
+this mode does not need `database_write` for a CLI-login POST. Separate catalog
+preflight, if enabled, retains its own permissions.
+
+**Input contract:** libpq PostgreSQL URI (`postgresql://` / `postgres://`) or
+keyword conninfo, parsed with `psycopg.conninfo.conninfo_to_dict`. Supply explicit
+`host`, `port`, `dbname` (URI path), `user` and a nonempty real `password`.
+The host and database must exactly match authenticated API-selected PRIMARY
+metadata, port must be **5432**, and user must be **`postgres.<project_ref>`**
+for the reviewed project matching `SUPABASE_URL`. Percent-encode URI credentials
+or use libpq keyword quoting. Literal setup/password placeholders are rejected.
+Direct `db.<ref>.supabase.co` hosts, lookalikes, another project, multi-host inputs,
+arbitrary login names, and all other options (including `hostaddr`, `options`,
+`service`, client certificates and service-file overrides) fail closed.
+
+Only `sslmode` and `sslrootcert` are optional additional input keys. Accepted
+`sslmode`: omitted, `require`, `verify-ca`, or `verify-full`; these are **input
+normalization**, not the connection's policy. The adapter always rebuilds with
+`verify-full` plus the reviewed system CA bundle selected by the existing helper.
+`disable`, `allow`, `prefer`, and unknown modes are rejected. `sslrootcert` may be
+omitted or the symbolic value `system`; **no caller-supplied CA file paths** are
+accepted. No plaintext fixture bypass exists in this parser.
+
+This mode **never calls the CLI login-role API**, even on missing/malformed
+credentials or database rejection, and never falls back to temporary login.
+Missing credentials report `setup_required`; invalid target/options/TLS fail
+before any database connection or custody write. Authentication/delegation
+errors expose stable safe codes, not driver exceptions. Normal native
+provisioner checks, ownership, role restrictions, migrations and RLS are unchanged.
+This does not resolve the uncertain outcome of any earlier CLI-login attempt;
+review that separately and never delete/reset the shared role to repair it.
+
+The bootstrap credential is used only in the in-process bootstrap connection.
+It is stripped from enroll/deploy/DNS subprocess environments (therefore also
+their build/Auth-verifier descendants), never persisted as runtime custody or
+Vercel configuration, and excluded from reports, argv and artifacts. It has the
+operator-managed lifetime of the existing credential; no new expiry is claimed.
+
 ## Existing-token capability matrix
 
 | Provider | Capability | Used for |
@@ -72,6 +119,7 @@ Tracked `database-delivery.config.json` (see
 | `migrations_path` | `null` | in-repo relative directory (no symlinks/escapes) |
 | `expected_project_ref` | `null` | must match `SUPABASE_URL` project ref |
 | `rotate_migrator` | `false` | explicit job-only migrator password rotation |
+| `bootstrap_mode` | `"temporary_login"` | `"temporary_login"` or explicit `"existing_secret"` (fixed extra Secret above) |
 
 Read-only catalog preflight remains `database-onboarding.config.json`.
 
@@ -143,6 +191,15 @@ Executable library entry points:
 - `scripts/launch-app.py` (`deploy` | `verify` | `enroll`)
 
 ## Verification
+
+Existing-secret regression coverage executes provisioning and migrations against
+real disposable PostgreSQL 17 with a `NOSUPERUSER CREATEROLE NOBYPASSRLS` bootstrap
+login. A fixture connector maps the validated provider host/login to loopback
+PostgreSQL; mocked Management/custody transports make no provider requests. Tests
+also execute real authentication/delegation failures, runtime own-user CRUD,
+cross-user/DDL denials, secret canary scans, and child-environment exclusion.
+These tests prove SQL/validation boundaries, not live Supavisor authentication,
+provider TLS negotiation, or deployed application readiness.
 
 ```bash
 APP003_PG_TESTS=1 MDB_PG_TESTS=1 MDB_DELIVERY_PG_TESTS=1 \

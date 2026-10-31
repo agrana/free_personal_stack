@@ -36,6 +36,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Seque
 PLACEHOLDER = 'SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE'
 TRUSTED_PROVISIONER_ROLE = 'postgres'
 RUNTIME_ENV_KEY = 'MDB_RUNTIME_DATABASE_URL'
+BOOTSTRAP_ENV_KEY = 'MDB_BOOTSTRAP_DATABASE_URL'
 MARKER_PREFIX = 'TEMPLATE_REPOSITORY_ID_'
 AUTH_RETRY_ATTEMPTS = 6
 AUTH_RETRY_SLEEP_SECONDS = 0.5
@@ -149,10 +150,12 @@ def project_ref_from_supabase_url(url: str) -> str:
     return match.group(1)
 
 
-def missing_delivery_secrets(env: Optional[Mapping[str, str]] = None) -> list:
+def missing_delivery_secrets(env: Optional[Mapping[str, str]] = None, *,
+                             bootstrap_mode: str = 'temporary_login') -> list:
     source = os.environ if env is None else env
     missing = []
-    for name in DELIVERY_SECRETS:
+    names = DELIVERY_SECRETS + ((BOOTSTRAP_ENV_KEY,) if bootstrap_mode == 'existing_secret' else ())
+    for name in names:
         raw = source.get(name, '')
         if not isinstance(raw, str) or not raw.strip() or raw.strip() == PLACEHOLDER:
             missing.append(name)
@@ -172,6 +175,17 @@ def capability_matrix() -> Dict[str, Any]:
                 'POST /v1/projects/{ref}/cli/login-role',
                 'GET /v1/projects/{ref}/config/database/pooler',
             ],
+            'bootstrap_modes': {
+                'temporary_login': {
+                    'required': ['database_write', 'database_pooling_config_read'],
+                    'cli_login_post': True,
+                },
+                'existing_secret': {
+                    'required': ['database_pooling_config_read'],
+                    'bootstrap_secret': BOOTSTRAP_ENV_KEY,
+                    'cli_login_post': False,
+                },
+            },
             'never': [
                 'DELETE /v1/projects/{ref}/cli/login-role',
                 'project postgres password reset',
@@ -306,6 +320,7 @@ def compute_delivery_binding_digest(
         'migrations_path': config.get('migrations_path'),
         'expected_project_ref': config.get('expected_project_ref'),
         'rotate_migrator': bool(config.get('rotate_migrator')),
+        'bootstrap_mode': config.get('bootstrap_mode', 'temporary_login'),
         'migration_checksums': list(migration_checksums or ()),
     }
     return hashlib.sha256(
@@ -587,7 +602,7 @@ def run_for_merge(
         _maybe_write_artifact(artifact_dir, report)
         return report
 
-    missing = missing_delivery_secrets(env_map)
+    missing = missing_delivery_secrets(env_map, bootstrap_mode=config.get('bootstrap_mode', 'temporary_login'))
     if missing:
         report = build_report(
             status='setup_required',
@@ -686,7 +701,7 @@ def execute_authorized_delivery(
         )
         _maybe_write_artifact(artifact_dir, report)
         raise DeliveryError('delivery_not_authorized')
-    missing = missing_delivery_secrets(env)
+    missing = missing_delivery_secrets(env, bootstrap_mode=config.get('bootstrap_mode', 'temporary_login'))
     if missing:
         report = build_report(
             status='setup_required',
@@ -838,6 +853,9 @@ def _execute_delivery_core(
     migrations_rel = config['migrations_path']
     expected_ref = config['expected_project_ref']
     rotate_migrator = bool(config.get('rotate_migrator'))
+    bootstrap_mode = config.get('bootstrap_mode', 'temporary_login')
+    if bootstrap_mode not in ('temporary_login', 'existing_secret'):
+        raise DeliveryError('config_bootstrap_mode_invalid')
     canaries: List[str] = []
 
     url = env.get('SUPABASE_URL', '')
@@ -911,6 +929,20 @@ def _execute_delivery_core(
             _maybe_write_artifact(artifact_dir, report)
             raise DeliveryError(str(exc), exc.diagnostic_fields()) from None
 
+    # Validate before custody or login mutation. No automatic fallback.
+    existing = None
+    if bootstrap_mode == 'existing_secret':
+        try:
+            if effective_ssl != 'verify-full':
+                raise provider.ProviderError('bootstrap_secret_sslmode_invalid')
+            existing = provider.validate_existing_bootstrap_conninfo(
+                env.get(BOOTSTRAP_ENV_KEY, ''), target=pooler)
+        except provider.ProviderError as exc:
+            report = build_report(status=str(exc), namespace=namespace)
+            _maybe_write_artifact(artifact_dir, report)
+            raise DeliveryError(str(exc)) from None
+        canaries.extend((env[BOOTSTRAP_ENV_KEY], existing.password.value))
+
     # Custody inventory (read-only) before any DB mutation or env write.
     try:
         custody_state = custody.inspect_runtime_custody(
@@ -938,7 +970,9 @@ def _execute_delivery_core(
         _maybe_write_artifact(artifact_dir, report)
         return report
 
-    if cli_login_override is not None:
+    if existing is not None:
+        login = None
+    elif cli_login_override is not None:
         login = cli_login_override
     else:
         try:
@@ -951,22 +985,27 @@ def _execute_delivery_core(
             report = build_report(status=str(exc), namespace=namespace, **exc.diagnostic_fields())
             _maybe_write_artifact(artifact_dir, report)
             raise DeliveryError(str(exc), exc.diagnostic_fields()) from None
-    canaries.append(login.password.value)
+    if login is not None:
+        canaries.append(login.password.value)
 
     roles = mdb.derive_role_names(namespace)
-    user = login.role if loopback_fixture else provider.pooler_login_username(
-        login.role, project_ref)
     try:
-        provisioner_dsn = provider.build_psycopg_dsn(
-            host=pooler.host,
-            port=pooler.port,
-            database=pooler.database,
-            user=user,
-            password=login.password.value,
-            sslmode=effective_ssl,
-            sslrootcert=sslrootcert,
-            loopback_fixture=loopback_fixture,
-        )
+        if existing is not None:
+            provisioner_dsn = existing.conninfo
+        else:
+            assert login is not None
+            user = login.role if loopback_fixture else provider.pooler_login_username(
+                login.role, project_ref)
+            provisioner_dsn = provider.build_psycopg_dsn(
+                host=pooler.host,
+                port=pooler.port,
+                database=pooler.database,
+                user=user,
+                password=login.password.value,
+                sslmode=effective_ssl,
+                sslrootcert=sslrootcert,
+                loopback_fixture=loopback_fixture,
+            )
     except provider.ProviderError as exc:
         report = build_report(status=str(exc), namespace=namespace)
         _maybe_write_artifact(artifact_dir, report)
@@ -975,12 +1014,17 @@ def _execute_delivery_core(
     connector = connect_fn or connect_with_retries
     try:
         conn = connector(provisioner_dsn)
-    except DeliveryError as exc:
-        report = build_report(status=str(exc), namespace=namespace)
+    except Exception:
+        report = build_report(status='database_auth_failed', namespace=namespace)
         _maybe_write_artifact(artifact_dir, report)
-        raise
+        raise DeliveryError('database_auth_failed') from None
 
-    runtime_created = False
+    runtime_created: Optional[bool] = False
+    runtime_write_attempted = False
+    runtime_persisted: Optional[bool] = custody_state['status'] == 'reusable'
+    database_mutation_attempted = False
+    database_mutation_completion = 'not_attempted'
+    provision_created: Optional[bool] = None
     runtime_password: Optional[str] = None
     runtime_validated_dsn: Optional[str] = None
     migrator_password = _Secret(generate_password())
@@ -988,7 +1032,10 @@ def _execute_delivery_core(
     created = False
     can_migrate = True
     migrate_result = None
-    call_order: List[str] = ['cli_login_or_override', 'provisioner_connect']
+    call_order: List[str] = [
+        'existing_secret' if existing is not None else 'cli_login_or_override',
+        'provisioner_connect',
+    ]
 
     try:
         assume_trusted_provisioner(conn, role=provisioner_role)
@@ -1121,6 +1168,10 @@ def _execute_delivery_core(
                 loopback_fixture=loopback_fixture,
             )
             call_order.append('custody_persist')
+            # A dispatched write may complete even when its caller raises.
+            runtime_write_attempted = True
+            runtime_persisted = None
+            runtime_created = None
             try:
                 persisted = custody.persist_runtime_env(
                     project_id=vercel_project_id,
@@ -1149,6 +1200,7 @@ def _execute_delivery_core(
                 _maybe_write_artifact(artifact_dir, report)
                 raise DeliveryError(str(exc), exc.diagnostic_fields()) from None
             runtime_created = bool(persisted.get('created'))
+            runtime_persisted = True
             # Re-validate exact readback before creating DB login.
             validated = provider.validate_runtime_conninfo(
                 persisted['value'].value,
@@ -1174,6 +1226,8 @@ def _execute_delivery_core(
         assert runtime_validated_dsn is not None
 
         call_order.append('provision_or_verify')
+        database_mutation_attempted = True
+        database_mutation_completion = 'uncertain'
         result = mdb.provision_app(
             namespace=namespace,
             repository_id=str(repository_id),
@@ -1185,8 +1239,11 @@ def _execute_delivery_core(
             allow_trusted_bootstrap_bypassrls=True,
         )
         created = bool(result.created)
+        provision_created = created
+        database_mutation_completion = 'confirmed'
         if not created and rotate_migrator:
             call_order.append('migrator_rotate')
+            database_mutation_completion = 'uncertain'
             mdb.set_owned_login_password(
                 namespace=namespace,
                 repository_id=str(repository_id),
@@ -1197,19 +1254,35 @@ def _execute_delivery_core(
                 expected_provisioner_role=provisioner_role,
                 allow_trusted_bootstrap_bypassrls=True,
             )
+            database_mutation_completion = 'confirmed'
         elif not created and not rotate_migrator:
             can_migrate = False
-    except mdb.ManagedDatabaseError as exc:
-        report = build_report(
-            status=exc.code,
-            namespace=namespace,
-            runtime_env_created=runtime_created,
-            call_order=call_order,
-        )
-        _redact_report_artifact(artifact_dir, report, canaries)
-        raise DeliveryError(exc.code) from None
     except DeliveryError:
         raise
+    except Exception as exc:
+        # Driver errors can contain credentials; never expose their chains.
+        # Library-normalized errors preserve the same uncertain checkpoints.
+        status = exc.code if isinstance(exc, mdb.ManagedDatabaseError) else 'database_bootstrap_failed'
+        # Preserve completed checkpoints, and do not mistake an interrupted
+        # dispatch for proof that its writes did not happen. None means unknown.
+        fields = {
+            'runtime_env_write_attempted': runtime_write_attempted,
+            'runtime_env_persisted': runtime_persisted,
+            'runtime_env_created': runtime_created,
+            'database_mutation_attempted': database_mutation_attempted,
+            'database_mutation_completion': database_mutation_completion,
+            'call_order': call_order,
+        }
+        if provision_created is not None:
+            fields['provision_created'] = provision_created
+        if not database_mutation_attempted:
+            fields.update(password_writes=0, ddl_writes=0)
+        if not runtime_write_attempted:
+            fields['vercel_writes'] = 0
+        report = build_report(
+            status=status, namespace=namespace, **fields)
+        _redact_report_artifact(artifact_dir, report, canaries)
+        raise DeliveryError(status) from None
     finally:
         try:
             conn.close()
@@ -1314,7 +1387,8 @@ def _execute_delivery_core(
         runtime_env_key=RUNTIME_ENV_KEY,
         runtime_env_created=runtime_created,
         trusted_provisioner_role=provisioner_role,
-        cli_login_ttl_seconds=login.ttl_seconds,
+        bootstrap_mode=bootstrap_mode,
+        cli_login_ttl_seconds=login.ttl_seconds if login is not None else None,
         migrator_custody='job_memory_only',
         local_runtime_proof=proof,
         call_order=call_order,
