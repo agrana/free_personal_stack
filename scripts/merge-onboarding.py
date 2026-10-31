@@ -40,7 +40,7 @@ DATABASE_PREFLIGHT_SECRETS = ('SUPABASE_URL', 'SUPABASE_ACCESS_TOKEN')
 DATABASE_DELIVERY_SECRETS = (
     'SUPABASE_URL', 'SUPABASE_ACCESS_TOKEN', 'VERCEL_API_TOKEN', 'VERCEL_TEAM_ID',
 )
-SECRET_ENV_KEYS = (*SHELL_SECRETS, 'CLOUDFLARE_API_TOKEN', 'SUPABASE_ACCESS_TOKEN', 'GITHUB_TOKEN')
+SECRET_ENV_KEYS = (*SHELL_SECRETS, 'CLOUDFLARE_API_TOKEN', 'SUPABASE_ACCESS_TOKEN', 'GITHUB_TOKEN', 'MDB_BOOTSTRAP_DATABASE_URL')
 QUALITY_WORKFLOW = 'app-quality.yml'
 QUALITY_WORKFLOW_PATH = '.github/workflows/' + QUALITY_WORKFLOW
 QUALITY_TIMEOUT_SEC = 1500
@@ -414,6 +414,9 @@ def run_python_script(script, source, binary, extra_args, env_updates, artifact_
                       *, timeout=DOMAIN_SUBPROCESS_CAP_SEC, capture_name=None, stage=None):
     env = os.environ.copy()
     env.update(env_updates)
+    # Bootstrap is in-process only: never enroll/deploy/DNS/build/Auth children.
+    redaction_env = dict(env)
+    env.pop('MDB_BOOTSTRAP_DATABASE_URL', None)
     python = resolve_orchestrator_python()
     # Never forward secret values into argv.
     args = [
@@ -446,8 +449,8 @@ def run_python_script(script, source, binary, extra_args, env_updates, artifact_
         if event.get('status') == 'project_enrolled' else None
         for event in parse_json_events(stdout)
     ]
-    stdout = sanitize_captured(stdout, env)
-    stderr = sanitize_captured(stderr, env)
+    stdout = sanitize_captured(stdout, redaction_env)
+    stderr = sanitize_captured(stderr, redaction_env)
     lines = parse_json_events(stdout)
     if len(lines) != len(enrollment_bindings):
         raise Failure('stage_event_redaction_mismatch')
@@ -736,7 +739,11 @@ def run(source, binary, artifact_dir, *, quality_wait=None, sleeper=None, clock=
             ])
 
         if delivery_live:
-            delivery_missing = missing_secrets(DATABASE_DELIVERY_SECRETS)
+            delivery_names = DATABASE_DELIVERY_SECRETS + (
+                ('MDB_BOOTSTRAP_DATABASE_URL',)
+                if delivery_config.get('bootstrap_mode', 'temporary_login') == 'existing_secret'
+                else ())
+            delivery_missing = missing_secrets(delivery_names)
             if delivery_missing:
                 result['status'] = 'setup_required'
                 result['required_secret_names'] = delivery_missing

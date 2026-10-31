@@ -31,6 +31,7 @@ ALLOWED_KEYS = (
     'migrations_path',
     'expected_project_ref',
     'rotate_migrator',
+    'bootstrap_mode',
 )
 MIGRATIONS_PATH_RE = re.compile(r'^[a-z0-9][a-z0-9._/-]{0,198}$')
 PROJECT_REF_RE = re.compile(r'^[a-z0-9]+$')
@@ -139,6 +140,12 @@ def _validate_migrations_path(root: Path, relative: str) -> str:
 
 
 def validate_mapping(data: Mapping[str, Any], *, source: Optional[Path] = None) -> Dict[str, Any]:
+    # Optional for already-generated repositories; explicit in new templates.
+    data = dict(data)
+    data.setdefault('bootstrap_mode', 'temporary_login')
+    bootstrap_mode = data['bootstrap_mode']
+    if bootstrap_mode not in ('temporary_login', 'existing_secret'):
+        raise ConfigError('config_bootstrap_mode_invalid')
     unknown = [k for k in data.keys() if k not in ALLOWED_KEYS]
     missing = [k for k in ALLOWED_KEYS if k not in data]
     if unknown:
@@ -183,6 +190,7 @@ def validate_mapping(data: Mapping[str, Any], *, source: Optional[Path] = None) 
             'migrations_path': None,
             'expected_project_ref': None,
             'rotate_migrator': False,
+            'bootstrap_mode': bootstrap_mode,
         }
 
     mdb = _load_mdb()
@@ -215,6 +223,7 @@ def validate_mapping(data: Mapping[str, Any], *, source: Optional[Path] = None) 
         'migrations_path': migrations_path,
         'expected_project_ref': expected_project_ref,
         'rotate_migrator': rotate_migrator,
+        'bootstrap_mode': bootstrap_mode,
     }
 
 
@@ -410,6 +419,7 @@ def disabled_unconfigured() -> Dict[str, Any]:
         'expected_project_ref': None,
         'rotate_migrator': False,
         'config_status': 'unconfigured',
+        'bootstrap_mode': 'temporary_login',
     }
 
 

@@ -492,6 +492,60 @@ def parse_conninfo(conninfo: str) -> Dict[str, str]:
     return {str(k): '' if v is None else str(v) for k, v in parsed.items()}
 
 
+def validate_existing_bootstrap_conninfo(
+    stored: str, *, target: SessionPoolerTarget,
+) -> ValidatedConninfo:
+    """Bind an existing credential to authenticated PRIMARY session metadata.
+
+    URI and keyword forms are parsed by libpq, then rebuilt from a closed set.
+    Absent/require/verify-ca TLS input is strengthened, never used verbatim.
+    Only the symbolic system trust selector is accepted, not caller CA paths.
+    """
+    if not isinstance(stored, str) or not stored.strip():
+        raise ProviderError('bootstrap_secret_missing')
+    try:
+        from psycopg.conninfo import conninfo_to_dict
+        parsed = conninfo_to_dict(stored)
+    except Exception:
+        raise ProviderError('bootstrap_secret_invalid') from None
+    if set(parsed) - ALLOWED_CONNINFO_KEYS:
+        raise ProviderError('bootstrap_secret_unapproved_options')
+    if (target.port != SESSION_POOLER_PORT
+            or target.db_user_suffix != target.project_ref):
+        raise ProviderError('bootstrap_target_invalid')
+    _validate_pooler_host(target.host)
+    expected_user = pooler_login_username('postgres', target.project_ref)
+    for key, expected in (
+        ('host', target.host), ('port', str(SESSION_POOLER_PORT)),
+        ('dbname', target.database), ('user', expected_user),
+    ):
+        if parsed.get(key) != expected:
+            raise ProviderError('bootstrap_secret_binding_mismatch')
+    password = parsed.get('password', '')
+    if (not password or not password.strip()
+            or password.strip().lower() in (
+                'setup_required_replace_with_real_value', '[your-password]',
+                '[your_password]', 'your-password', 'your_password',
+                '<password>', '<your-password>', 'password', 'changeme',
+            )):
+        raise ProviderError('bootstrap_secret_password_invalid')
+    if parsed.get('sslmode') not in (None, 'require', 'verify-ca', 'verify-full'):
+        raise ProviderError('bootstrap_secret_sslmode_invalid')
+    if parsed.get('sslrootcert') not in (None, 'system'):
+        raise ProviderError('bootstrap_secret_sslrootcert_invalid')
+    rootcert = resolve_system_ssl_rootcert()
+    rebuilt = build_psycopg_dsn(
+        host=target.host, port=SESSION_POOLER_PORT, database=target.database,
+        user=expected_user, password=password, sslmode=PRODUCTION_SSLMODE,
+        sslrootcert=rootcert,
+    )
+    return ValidatedConninfo(
+        host=target.host, port=SESSION_POOLER_PORT, database=target.database,
+        user=expected_user, password=_Secret(password), sslmode=PRODUCTION_SSLMODE,
+        sslrootcert=rootcert, conninfo=rebuilt,
+    )
+
+
 def validate_runtime_conninfo(
     stored: str,
     *,

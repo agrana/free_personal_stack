@@ -5,5 +5,6 @@
   "namespace": null,
   "migrations_path": null,
   "expected_project_ref": null,
-  "rotate_migrator": false
+  "rotate_migrator": false,
+  "bootstrap_mode": "temporary_login"
 }
