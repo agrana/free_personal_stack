@@ -224,8 +224,10 @@ def normalize_primary_session_pooler(
 ) -> SessionPoolerTarget:
     """Derive the PRIMARY shared session-mode pooler target.
 
-    Discards any credential material in connection strings. Rejects transaction
-    mode (6543), inconsistent project suffixes, and unsafe URLs.
+    Discards credentials in connection strings. The Management API can advertise
+    transaction mode by default; the documented shared-host session endpoint is
+    always port 5432. Never change project pooler settings or connect on 6543.
+    https://supabase.com/docs/guides/database/connecting-to-postgres
     """
     ref = _require_ref(project_ref)
     if not isinstance(rows, list) or not rows:
@@ -248,17 +250,23 @@ def normalize_primary_session_pooler(
 
     pool_mode = primary.get('pool_mode')
     db_port = primary.get('db_port')
-    # Prefer explicit session-mode metadata; never fall back to transaction port.
-    if db_port == TRANSACTION_POOLER_PORT or pool_mode == 'transaction':
-        raise ProviderError('pooler_transaction_mode_forbidden')
-    if pool_mode is not None and pool_mode != 'session':
+    # Metadata describes the advertised/default endpoint, not the absence of
+    # session mode on this shared host. Select the documented 5432 endpoint.
+    if pool_mode is not None and pool_mode not in ('session', 'transaction'):
         raise ProviderError('pooler_session_mode_required')
-    if db_port is not None and db_port != SESSION_POOLER_PORT:
+    if db_port is not None and (
+        not isinstance(db_port, int)
+        or isinstance(db_port, bool)
+        or db_port not in (SESSION_POOLER_PORT, TRANSACTION_POOLER_PORT)
+    ):
         raise ProviderError('pooler_port_invalid')
 
     raw_cs = _connection_string_from_row(primary)
     try:
-        parsed = urlparse(raw_cs)
+        # Provider placeholders such as [YOUR-PASSWORD] are not IPv6 literals.
+        # Escape brackets before URL parsing; credentials are discarded below.
+        parsed = urlparse(raw_cs.replace('[', '%5B').replace(']', '%5D'))
+        advertised_port = parsed.port or SESSION_POOLER_PORT
     except Exception:
         raise ProviderError('pooler_connection_string_invalid') from None
     if parsed.scheme not in ('postgres', 'postgresql'):
@@ -266,10 +274,7 @@ def normalize_primary_session_pooler(
     if parsed.hostname is None:
         raise ProviderError('pooler_host_invalid')
     host = _validate_pooler_host(parsed.hostname)
-    port = parsed.port or SESSION_POOLER_PORT
-    if port != SESSION_POOLER_PORT:
-        if port == TRANSACTION_POOLER_PORT:
-            raise ProviderError('pooler_transaction_mode_forbidden')
+    if advertised_port not in (SESSION_POOLER_PORT, TRANSACTION_POOLER_PORT):
         raise ProviderError('pooler_port_invalid')
     if parsed.path and parsed.path not in ('', '/'):
         path_db = unquote(parsed.path.lstrip('/').split('/', 1)[0])

@@ -34,6 +34,13 @@ Secrets.
 | Vercel | production deploy | existing shell launcher (unchanged gates) |
 | GitHub | PR/config merge + Actions secret settings | reviewed desired-state policy |
 
+The pooler response can advertise the transaction endpoint on port 6543. The adapter
+keeps the authenticated API-reported PRIMARY shared-pooler host and project/database
+binding, then selects its documented session endpoint on port 5432. Credentials and
+password placeholders in the advertised URL are discarded. This selects a client
+connection endpoint; it leaves shared project pooler configuration unchanged and
+never connects on port 6543. See Supabase's [connection-mode documentation](https://supabase.com/docs/guides/database/connecting-to-postgres).
+
 Never call `DELETE /cli/login-role` (shared CLI role deletion). Never reset the
 project `postgres` password or unrelated memberships to repair login-role
 failures — fail closed with a safe capability code. Provider CLI roles may be

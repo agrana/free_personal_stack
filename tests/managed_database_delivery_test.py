@@ -352,10 +352,34 @@ class ProviderTransportTests(unittest.TestCase):
         self.assertEqual(target.database, "postgres")
         self.assertNotIn(discarded, repr(target))
 
-        bad_port = dict(rows[0], db_port=6543, pool_mode="transaction")
-        with self.assertRaises(provider.ProviderError) as ctx:
-            provider.normalize_primary_session_pooler([bad_port], project_ref=ref)
-        self.assertIn("transaction", str(ctx.exception))
+        transaction_metadata = dict(
+            rows[0], db_port=6543, pool_mode="transaction",
+            connection_string=cs.replace(':5432/', ':6543/'),
+        )
+        session = provider.normalize_primary_session_pooler(
+            [transaction_metadata], project_ref=ref)
+        self.assertEqual(session.host, host)
+        self.assertEqual(session.port, 5432)
+        self.assertEqual(session.database, 'postgres')
+        self.assertEqual(transaction_metadata['db_port'], 6543)
+        self.assertEqual(transaction_metadata['pool_mode'], 'transaction')
+
+        templated = dict(transaction_metadata, connection_string=(
+            f'postgresql://{role}.{ref}:[YOUR-PASSWORD]@{host}:6543/postgres'))
+        self.assertEqual(provider.normalize_primary_session_pooler(
+            [templated], project_ref=ref).port, 5432)
+
+        for invalid in (
+            dict(rows[0], db_port=1234),
+            dict(rows[0], db_port=5432.0),
+            dict(rows[0], pool_mode='unknown'),
+            dict(rows[0], connection_string=cs.replace(':5432/', ':1234/')),
+            dict(rows[0], connection_string=cs.replace(':5432/', ':invalid/')),
+            dict(rows[0], connection_string=cs.replace(host, host + '.invalid')),
+            dict(transaction_metadata, db_host='db.other.supabase.co'),
+        ):
+            with self.assertRaises(provider.ProviderError):
+                provider.normalize_primary_session_pooler([invalid], project_ref=ref)
 
         bad_ref = dict(
             rows[0],
