@@ -51,7 +51,7 @@ arbitrary login names, and all other options (including `hostaddr`, `options`,
 Only `sslmode` and `sslrootcert` are optional additional input keys. Accepted
 `sslmode`: omitted, `require`, `verify-ca`, or `verify-full`; these are **input
 normalization**, not the connection's policy. The adapter always rebuilds with
-`verify-full` plus the reviewed system CA bundle selected by the existing helper.
+`verify-full` plus the fixed, hash-checked [reviewed provider CA](supabase-provider-trust.md).
 `disable`, `allow`, `prefer`, and unknown modes are rejected. `sslrootcert` may be
 omitted or the symbolic value `system`; **no caller-supplied CA file paths** are
 accepted. No plaintext fixture bypass exists in this parser.
@@ -150,7 +150,7 @@ supported and covered by PG17 tests. App owner/migrator/runtime roles stay
 to use migrator `session_user`.
 
 TLS: real Supabase connections use `sslmode=verify-full` with an explicit
-reviewed system CA bundle (`sslrootcert`). Plaintext is allowed only for
+reviewed provider CA (`sslrootcert`); missing/tampered trust fails closed. Plaintext is allowed only for
 explicit loopback disposable fixtures and is never a production bypass.
 Migrator credentials are job-memory only in this slice (no durable expiry API
 is claimed).
