@@ -34,6 +34,10 @@ CI/CD automation and GitHub Actions documentation:
 - `GITHUB_ACTIONS_TERRAFORM.md` - GitHub Actions Terraform guide
 - `MERGE_CHECKLIST.md` - Merge checklist for pull requests
 
+### `/docs/decisions/`
+Accepted planning decisions:
+- `shared-supabase.md` - APP-009 accepted shared Supabase choice, coupled risks, cost/telemetry boundaries
+
 ### `/docs/`
 General documentation:
 - `end-to-end-onboarding.md` - Required GitHub-only hostname, database, migrations and live verification contract, with current implementation gaps

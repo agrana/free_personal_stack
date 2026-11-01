@@ -151,6 +151,8 @@ Differences (not invented live evidence):
 ## Related docs
 
 - [secrets-only-launch.md](secrets-only-launch.md) — primary human launch path
+- [decisions/shared-supabase.md](decisions/shared-supabase.md) — accepted shared Supabase boundaries (APP-009)
+- [supabase-upgrade-isolation.md](supabase-upgrade-isolation.md) — future isolation checklist only
 - [AGENTS.md](../AGENTS.md) — agent/developer commands and safety gates
 - [bootstrap.md](bootstrap.md) — advanced initializer (blocked live apply)
 - [app-deployment.md](app-deployment.md) — advanced guarded verification
