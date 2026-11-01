@@ -2,57 +2,52 @@
 
 ## Start here
 
-Read `package.json`, `README.md`, `docs/secrets-only-launch.md` and relevant workflows before editing. Inspect `git status --short --branch`, preserve existing work and check directory-specific instructions. This is a Next.js/TypeScript application and reusable infrastructure template.
+Read `package.json`, `README.md`, `docs/end-to-end-onboarding.md` and relevant workflows before editing. Inspect `git status --short --branch`, preserve existing work and check directory-specific instructions. This is a Next.js/TypeScript application and reusable infrastructure template.
 
 Use GitHub **Use this template** to generate an independent app repository, not a fork. Determine whether this checkout is upstream or a generated app. Reusable fixes belong upstream; product features belong in the generated app. Template updates do not propagate automatically.
 
-## Primary onboarding: secrets-only shell
+## Required end-to-end onboarding: GitHub Actions
 
-The supported initial path is **generate repository → fill four repository Actions secrets → Run workflow: Launch app (`deploy`)** on the default branch. It requires only `VERCEL_API_TOKEN`, `VERCEL_TEAM_ID`, `SUPABASE_URL` and `SUPABASE_ANON_KEY` (modern publishable key accepted). No local `.env`, initial app-config edit, Cloudflare, service-role or Terraform credentials are needed. See `docs/secrets-only-launch.md` for permissions and recovery. Secret edits do not trigger Actions.
+The required path is **generate repository → store Secrets in GitHub → review/merge prepared `onboarding.config.json` → automatic shell deploy and hostname/DNS → validate database connection and apply app-scoped schema migrations → verify the application end to end**. Operators fill Secrets and approve merge requests; they do not click Run workflow or copy digests for routine apply. Workflows install their own tools. Before provisioning an application project, require its intended hostname and authoritative zone in the merge-reviewed config, and the approved database target via repository Supabase Secrets (not a nonexistent onboarding.config database field). Every application has an intended hostname.
 
-The separate CLI launcher derives project slug and immutable repository ID/SHA from authenticated GitHub metadata. Manual first deploy authorizes project creation; later default-branch pushes only update a previously owned project. Upstream numeric repository ID is blocked. A production Config marker binds project ownership. Missing markers after interruption require manually reviewed `expected_project_id` and `confirm_repository_id`; conflicting markers can never be overridden. Never infer ownership from project name alone.
+Application onboarding is complete only after the intended hostname passes DNS, HTTPS, page and exact deployed-revision checks, the deployed application connects to its intended database, reviewed schema migrations are applied, and app-scoped permissions and RLS isolation are verified. A working Vercel shell is an intermediate result. See `docs/end-to-end-onboarding.md` for the required contract and actual implementation gaps.
 
-Keep root layout and landing page database-free and free of inherited `Navigation` or demo verification UI. Reusable `/auth/signin` and `/auth/signout` code remains reachable without root links: configure and review auth separately. `/api/health` reports process liveness and exact deployed SHA, not database access or authentication readiness. Distinguish protected deployments from public verification success.
+| Operation | Required configuration | Workflow |
+| --- | --- | --- |
+| Merge-driven shell deploy + required hostname/DNS | Repository secrets `VERCEL_API_TOKEN`, `VERCEL_TEAM_ID`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `CLOUDFLARE_API_TOKEN`; tracked `onboarding.config.json` with hostname, zone, and `auto_apply: true` (default `false` in the template) | **Merge onboarding** (default-branch push after App Quality succeeds) |
+| Maintainer shell deploy / recovery | Same four shell secrets; optional exact `expected_project_id` + `confirm_repository_id` | **Launch app** (`workflow_dispatch`) |
+| Maintainer hostname/DNS digest apply | Reuse Vercel secrets; `CLOUDFLARE_API_TOKEN`; variables `APP_HOSTNAME`, `CLOUDFLARE_ZONE_NAME` | **Custom domain** (`plan`, approved `apply`, `verify`) |
+| Opt-in read-only managed-service catalog preflight | Repository secrets `SUPABASE_URL` and `SUPABASE_ACCESS_TOKEN` (Management API `database:read` / `database_read`); tracked `database-onboarding.config.json` with `enabled: true` and a safe `namespace` (template default `enabled: false`) | **Merge onboarding** after exact-head App Quality, before shell writes; see `docs/database-onboarding.md`. Catalog inspection is not database readiness. |
+| Opt-in managed database delivery (existing Management + Vercel credentials) | Tracked `database-delivery.config.json` (template `enabled`/`auto_apply` false); Secrets `SUPABASE_ACCESS_TOKEN` (`database_write` + `database_pooling_config_read`), `SUPABASE_URL`, `VERCEL_API_TOKEN`, `VERCEL_TEAM_ID`. Merge path: enroll → authorized delivery → deploy; see `docs/managed-database-delivery.md`. | Template stays disabled until a reviewed config PR; deployed JWT/data-path proof remains separate. |
+| Required database connection and app-scoped schema migrations | Prefer delivery library above when activated; runtime uses RLS-governed credentials in owned Vercel encrypted env. Template delivery config stays disabled. | Code path exists but template is disabled; deployed HTTP/JWT/data-path verification remains an implementation gap. The current migration workflow is disabled. Report onboarding as incomplete. |
+| Terraform administration and exceptional privileged database maintenance | Use the credentials and approvals specified by the reviewed operation. These are separate from normal app-scoped connection and migration onboarding. | Consult the advanced workflow and its safety gates |
+
+Initial setup uses GitHub Secrets plus a merge-reviewed onboarding config rather than a local `.env`. Keep service-role access restricted to separately reviewed privileged operations. Automated apply authorization is the desired-state policy approved by merge (`auto_apply`); maintainer manual-digest operations remain a separate interface. See `docs/secrets-only-launch.md` and `docs/custom-domain.md` for permissions, ownership recovery and verification.
+
+The separate CLI launcher derives project slug and immutable repository ID/SHA from authenticated GitHub metadata. Merge-reviewed `auto_apply` with a required hostname authorizes project creation and production deployment on default-branch push; maintainer **Launch app** dispatch remains available. Upstream numeric repository ID is blocked. A production Config marker binds project ownership. Missing markers after interruption require exact `expected_project_id` and `confirm_repository_id` (config recovery fields or manual dispatch); conflicting markers can never be overridden. Never infer ownership from project name alone.
+
+The initial shell uses a lightweight landing page and liveness route. `/api/health` reports process liveness and the exact deployed SHA; a separate real application data-path check establishes database readiness. Reusable `/auth/signin` and `/auth/signout` code requires configured providers and redirects before use. Verify the required database integration, migrations and isolation even when the landing page renders successfully. Distinguish protected deployments from public verification success.
 
 ## Data and resource ownership
 
-- Vercel hosts a distinct project for each application. Select the explicit intended team ID.
-- Users may choose an existing Supabase project or create one externally before launch. Prefer a dedicated project/database for isolation; shared-project reuse is an explicit user choice with shared-resource risk. The launcher creates no database, schema, migrations or demo data.
-- Before enabling data features, require reviewed app-scoped schema/migration ownership, least privilege, RLS and cross-user/cross-app isolation tests. Shell deployment does not verify RLS. Service-role credentials bypass RLS and cannot prove isolation.
-- Optional advanced Cloudflare DNS and Terraform state remain separately scoped. Preserve other apps, database lifecycle, DNS zones and email settings. Provisioning/migrations require explicit review and backup/recovery planning.
+- Each application owns a distinct Vercel project and an intended hostname. Select the explicit intended team ID and verify the hostname routes to that owned project.
+- Select the Supabase target during onboarding. Prefer a dedicated project/database for isolation; shared-project reuse is an explicit user choice with shared-resource risk. Require app-owned schema, migration ownership, least privilege, RLS and cross-user/cross-app isolation tests as normal onboarding requirements.
+- The current shell launcher binds public configuration but performs no live schema migrations or application-table connection test. Its success proves that intermediate stage only. Optional merge-time read-only catalog preflight (`docs/database-onboarding.md`) observes managed-service catalog facts only; it never authorizes migrations or claims `database_ready` / `full_app_ready`. Routine application access must obey RLS; service-role credentials bypass RLS and cannot prove isolation.
+- Preserve other applications, database lifecycle, unrelated DNS records and email settings during onboarding. Keep Terraform state management and privileged database operations separately scoped, with their own review and backup/recovery requirements.
 
-## Local developer verification
+## Required hostname and DNS
 
-Node.js 24.x is declared in `package.json`. Review dependency scripts before installation. These developer commands are not initial launch prerequisites:
+DNS is a required onboarding stage. Intended hostname and Cloudflare zone come from tracked `onboarding.config.json`. With Secrets present and `auto_apply: true`, **Merge onboarding** attaches the hostname and creates only its DNS-only CNAME after App Quality succeeds on the current head. Maintainer **Custom domain** (`plan`, approved digest `apply`, `verify`) remains available and may still use repository variables `APP_HOSTNAME` / `CLOUDFLARE_ZONE_NAME`. See `docs/custom-domain.md`.
 
-```bash
-npm ci
-python3 -m venv .venv
-.venv/bin/pip install -r requirements-bootstrap.txt
-npm run lint
-npm run type-check
-.venv/bin/python scripts/run-all-tests.py
-npm run build
-```
+The automation attaches the hostname to the owned Vercel project and manages only approved hostname records for that configured name/zone. Preserve deployment protection, other aliases, zone settings, Auth and database configuration. Report the Vercel shell as an intermediate result until authoritative/public DNS, HTTPS, the application page and exact production health revision pass at the configured hostname. Data-backed features additionally require their own auth and RLS checks. Merge-onboarding success never means full-app-ready while database/migration/RLS orchestration remains unimplemented.
 
-The runner explicitly includes hyphenated and underscored test filenames. Focused shell/workflow checks:
+## Verification through GitHub Actions
 
-```bash
-.venv/bin/python -m unittest tests.template_shell_test tests.workflow_safety_test -v
-```
+Operators run **App Quality (APP-006)** through GitHub Actions for lint, typecheck, isolated PostgreSQL tests, build and security checks. That workflow installs Podman on its runner and provisions disposable PostgreSQL itself. Podman is a CI test-harness implementation detail, not an operator prerequisite.
 
-Database integration requires Podman and disposable PostgreSQL; inspect `tests/shared_db_isolation_test.py`. Use `APP003_PG_TESTS=1` to require integration instead of accepting a skip. Report skips and missing prerequisites separately. Builds may require approved public Supabase configuration for retained auth routes: label synthetic local test values and keep production credentials out of local tests. The shell itself does not consume database configuration. Health tests use the explicit server-only `APP006_LOCAL_TEST_REVISION` fixture; never fake production verification.
+Credential-free CI uses labelled synthetic public build settings and a test-only server revision fixture. These establish test/build behavior. End-to-end acceptance additionally requires the real hostname, deployed application-to-database connection, applied schema migrations and isolation checks against the approved target. Keep missing live stages visible even when quality CI passes.
 
-For advanced infrastructure edits:
-
-```bash
-./scripts/validate-app-config.sh --config examples/app.config.example.json --mode draft
-terraform -chdir=terraform fmt -check -recursive
-terraform -chdir=terraform init -backend=false
-terraform -chdir=terraform validate
-```
-
-Provider initialization downloads dependencies. These checks prove local validity, not live permissions or deployment.
+Maintainers who choose to reproduce CI locally can use `docs/maintainer-verification.md`. Local Node, Python, Podman, PostgreSQL or Terraform installations are optional maintainer tooling; application onboarding runs through GitHub settings and Actions.
 
 ## Credentials and optional placeholder setup
 

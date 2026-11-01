@@ -4,6 +4,10 @@
 An interrupted create without a marker fails closed. Review its emitted project ID,
 then manually dispatch with expected_project_id and confirm_repository_id to adopt
 that exact unmarked project. A conflicting marker can never be overridden.
+
+Default-branch push is authorized only under a merge-reviewed onboarding.config.json
+with auto_apply=true and a required hostname (ONBOARDING_MERGE_POLICY=1 from the
+merge-onboarding orchestrator). Manual workflow_dispatch remains the maintainer path.
 """
 import argparse
 import hashlib
@@ -102,6 +106,39 @@ def cli(binary, source, team, *args, value=None, structured=True):
     except ValueError:
         raise Failure('cli_json_invalid') from None
 
+def merge_policy_context(source, sha):
+    """Push mutations require merge-reviewed auto_apply policy + hostname."""
+    if os.environ.get('ONBOARDING_MERGE_POLICY') != '1':
+        raise Failure('event_not_authorized')
+    cfg = load('onboarding-config')
+    try:
+        config = cfg.load_onboarding_config(
+            source, require_tracked_clean=True, expected_sha=sha)
+    except cfg.ConfigError as exc:
+        raise Failure(str(exc)) from None
+    if not config['auto_apply']:
+        raise Failure('onboarding_auto_apply_disabled')
+    if not config['hostname'] or not config['cloudflare_zone_name']:
+        raise Failure('hostname_required_before_provisioning')
+    return config
+
+
+def canonical_vercel_project_name(repo_name):
+    """Map a GitHub repository name to the launcher-owned Vercel project name.
+
+    Underscores and adjacent separators are normalized to Vercel-safe hyphen
+    segments. Delivery and enrollment must reuse this exact identity.
+    """
+    if not isinstance(repo_name, str) or not repo_name:
+        raise Failure('slug_invalid')
+    lowered = repo_name.lower().replace('_', '-')
+    collapsed = re.sub(r'-+', '-', lowered).strip('-')
+    if len(collapsed) > 100 or not re.fullmatch(
+            r'[a-z][a-z0-9]*(?:-[a-z0-9]+)*', collapsed):
+        raise Failure('slug_invalid')
+    return collapsed
+
+
 def context(source):
     repo = os.environ.get('GITHUB_REPOSITORY', '')
     rid = os.environ.get('GITHUB_REPOSITORY_ID', '')
@@ -110,9 +147,7 @@ def context(source):
         raise Failure('repository_invalid')
     if not re.fullmatch(r'[1-9][0-9]*', rid) or rid == UPSTREAM_ID:
         raise Failure('template_or_repository_invalid')
-    slug = repo.split('/')[1].lower()
-    if len(slug) > 100 or not re.fullmatch(r'[a-z][a-z0-9]*(?:-[a-z0-9]+)*', slug):
-        raise Failure('slug_invalid')
+    slug = canonical_vercel_project_name(repo.split('/')[1])
     if not re.fullmatch(r'[0-9a-f]{40}', sha):
         raise Failure('source_sha_invalid')
     metadata = github('/repositories/' + rid)
@@ -122,15 +157,21 @@ def context(source):
     branch = metadata.get('default_branch')
     if not isinstance(branch, str) or not branch:
         raise Failure('default_branch_invalid')
-    if (os.environ.get('GITHUB_EVENT_NAME') not in ('workflow_dispatch', 'push')
-            or os.environ.get('GITHUB_REF') != 'refs/heads/' + branch):
+    event = os.environ.get('GITHUB_EVENT_NAME')
+    if event == 'workflow_dispatch':
+        policy = None
+    elif event == 'push':
+        policy = merge_policy_context(source, sha)
+    else:
+        raise Failure('event_not_authorized')
+    if os.environ.get('GITHUB_REF') != 'refs/heads/' + branch:
         raise Failure('event_not_authorized')
     remote = github('/repos/' + repo + '/commits/' + urllib.parse.quote(branch, safe=''))
     if remote.get('sha') != sha or command(['git', 'rev-parse', 'HEAD'], source) != sha:
         raise Failure('source_sha_mismatch')
     if command(['git', 'status', '--porcelain', '--untracked-files=all'], source):
         raise Failure('source_dirty')
-    return rid, slug, sha
+    return rid, slug, sha, policy
 
 def get_page(url):
     try:
@@ -165,16 +206,41 @@ def verify_page(url, sha):
         raise Failure('health_revision_invalid')
     return True
 
-def run(source, binary, operation='deploy', expected_project=None, confirm_repository=None):
+def delivery_binding_digest_from_env():
+    """Optional non-secret reviewed delivery binding for deployment reuse."""
+    raw = os.environ.get('ONBOARDING_DELIVERY_BINDING_SHA256', '').strip()
+    if not raw:
+        return None
+    if not re.fullmatch(r'[0-9a-f]{64}', raw):
+        raise Failure('delivery_binding_digest_invalid')
+    return raw
+
+
+def enroll_plan_mutations(matches):
+    mutations = []
+    if not matches:
+        mutations.append('create_project')
+    mutations.append('repository_marker')
+    return mutations
+
+
+def deploy_plan_mutations(matches):
+    return ['public_configuration', 'production_deployment'] + (
+        [] if matches else ['create_project'])
+
+
+def run(source, binary, operation='deploy', expected_project=None, confirm_repository=None,
+        bound_project=None):
     if any(not os.environ.get(k, '').strip() or os.environ[k].strip() ==
            'SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE' for k in REQUIRED):
         emit(status='setup_required', required_secret_names=list(REQUIRED))
         return 0
-    rid, name, sha = context(source)
+    rid, name, sha, policy = context(source)
     marker_key = MARKER + rid
     public_config = {key: os.environ[key] for key in ('SUPABASE_URL', 'SUPABASE_ANON_KEY')}
     team = identifier(os.environ['VERCEL_TEAM_ID'], 'team_')
     token = os.environ['VERCEL_API_TOKEN']
+    delivery_digest = delivery_binding_digest_from_env()
     vercel = load('check-vercel-access')
     try:
         load('check-supabase-access').check(os.environ['SUPABASE_URL'], os.environ['SUPABASE_ANON_KEY'])
@@ -218,21 +284,66 @@ def run(source, binary, operation='deploy', expected_project=None, confirm_repos
     if len(matches) > 1:
         raise Failure('project_collision')
     manual = os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch'
+    merge_auto = policy is not None and policy.get('auto_apply') is True
+    if (expected_project is None and policy is not None and merge_auto
+            and policy.get('expected_project_id')):
+        if bound_project:
+            # The reviewed recovery pair may remain in config after enrollment.
+            # Check its consistency, while keeping bound deploy strictly marked:
+            # it never acquires authority to adopt/re-mark an unmarked project.
+            if (policy['expected_project_id'] != bound_project
+                    or policy['confirm_repository_id'] != rid):
+                raise Failure('bound_project_recovery_conflict')
+        else:
+            expected_project = policy['expected_project_id']
+            confirm_repository = policy['confirm_repository_id']
+    if bound_project:
+        identifier(bound_project, 'prj_')
+        # Cross-stage pin of an already enrolled/marked project. Does not grant
+        # unmarked recovery authority (expected_project remains separate).
+        if expected_project:
+            raise Failure('bound_project_recovery_conflict')
+        if operation != 'deploy':
+            raise Failure('bound_project_not_authorized')
+        if len(matches) != 1 or matches[0].get('id') != bound_project:
+            raise Failure('bound_project_mismatch')
     if expected_project:
         identifier(expected_project, 'prj_')
-        if not manual or operation != 'deploy' or confirm_repository != rid:
+        # Recovery: deploy or enroll under manual dispatch / merge-policy push.
+        if operation not in ('deploy', 'enroll') or confirm_repository != rid:
+            raise Failure('recovery_not_authorized')
+        if not manual and not merge_auto:
             raise Failure('recovery_not_authorized')
         if len(matches) != 1 or matches[0].get('id') != expected_project:
             raise Failure('expected_project_mismatch')
+    if operation == 'verify':
+        allowed = []
+    elif operation == 'enroll':
+        allowed = enroll_plan_mutations(matches)
+    elif bound_project:
+        # Bound deploy may only configure/deploy the pinned marked project.
+        allowed = ['public_configuration', 'production_deployment']
+    else:
+        allowed = deploy_plan_mutations(matches)
     plan = {'repository_id': rid, 'team_id': team, 'project_name': name, 'source_sha': sha,
             'public_configuration_sha256': config_sha,
-            'allowed_mutations': ([] if operation == 'verify' else
-                ['public_configuration', 'production_deployment'] + ([] if matches else ['create_project']))}
+            'allowed_mutations': allowed}
+    if delivery_digest:
+        plan['delivery_binding_sha256'] = delivery_digest
+    if bound_project:
+        plan['bound_project_id'] = bound_project
     digest = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
     emit(status='plan', digest=digest, **plan)
     if not matches:
-        if not manual or operation != 'deploy':
+        if bound_project:
+            raise Failure('bound_project_mismatch')
+        # First create: manual dispatch, or merge-policy push with required hostname.
+        if operation not in ('deploy', 'enroll'):
             raise Failure('manual_creation_required')
+        if not manual and not merge_auto:
+            raise Failure('manual_creation_required')
+        if merge_auto and not (policy and policy.get('hostname')):
+            raise Failure('hostname_required_before_provisioning')
         # Revalidate source and GitHub identity before the first write.
         context(source)
         # project create swallows HTTP 409 in CLI 65.4; api preserves failure.
@@ -252,9 +363,13 @@ def run(source, binary, operation='deploy', expected_project=None, confirm_repos
         needs_marker = True
     else:
         pid = identifier(matches[0].get('id'), 'prj_')
+        if bound_project and pid != bound_project:
+            raise Failure('bound_project_mismatch')
         emit(status='project_readback', project_id=pid)
         project = owned(pid)
         needs_marker = not marker(pid)
+        if bound_project and needs_marker:
+            raise Failure('bound_project_marker_missing')
         if needs_marker and not expected_project:
             raise Failure('unmarked_project_requires_explicit_recovery')
     def add(key, value, force=False):
@@ -272,12 +387,28 @@ def run(source, binary, operation='deploy', expected_project=None, confirm_repos
         add(marker_key, rid)
         if not marker(pid):
             raise Failure('repository_marker_missing')
+    # Enrollment stops after owned project + marker proof; never deploys.
+    if operation == 'enroll':
+        owned(pid)
+        if not marker(pid):
+            raise Failure('repository_marker_missing')
+        emit(status='project_enrolled', project_id=pid, team_id=team,
+             repository_id=rid, source_sha=sha, project_name=name)
+        return 0
     target = project.get('targets', {}).get('production', {}).get('id')
     remote = read('/v13/deployments/' + identifier(target, 'dpl_')) if target else None
+    remote_meta = remote.get('meta', {}) if remote else {}
     same = (remote and remote.get('readyState') == 'READY' and remote.get('target') == 'production'
-            and remote.get('projectId') == pid and remote.get('meta', {}).get('githubCommitSha') == sha
-            and str(remote.get('meta', {}).get('githubRepoId')) == rid
-            and remote.get('meta', {}).get('templatePublicConfigSha256') == config_sha)
+            and remote.get('projectId') == pid and remote_meta.get('githubCommitSha') == sha
+            and str(remote_meta.get('githubRepoId')) == rid
+            and remote_meta.get('templatePublicConfigSha256') == config_sha)
+    if delivery_digest:
+        # Public-config-only READY shells are not delivery-complete deployments.
+        same = same and remote_meta.get('templateDeliveryBindingSha256') == delivery_digest
+    elif remote_meta.get('templateDeliveryBindingSha256'):
+        # Disabled/default path must not reuse a prior delivery-bound deployment
+        # when the current merge does not carry delivery binding.
+        same = False
     projected = {}
     if not same:
         if operation == 'verify':
@@ -289,20 +420,28 @@ def run(source, binary, operation='deploy', expected_project=None, confirm_repos
         if not marker(pid):
             raise Failure('repository_marker_missing')
         context(source)
+        meta_tail = ['--meta', 'githubCommitSha=' + sha, '--meta', 'githubRepoId=' + rid,
+                     '--meta', 'templatePublicConfigSha256=' + config_sha]
+        if delivery_digest:
+            meta_tail.extend(['--meta', 'templateDeliveryBindingSha256=' + delivery_digest])
         projected = cli(binary, source, team, 'deploy', str(source), '--project', pid, '--prod',
-            '--yes', '--json', '--meta', 'githubCommitSha=' + sha, '--meta', 'githubRepoId=' + rid,
-            '--meta', 'templatePublicConfigSha256=' + config_sha,
+            '--yes', '--json', *meta_tail,
             '--env', 'VERCEL_GIT_COMMIT_SHA=' + sha, '--build-env', 'VERCEL_GIT_COMMIT_SHA=' + sha)
         projected = projected.get('deployment', projected)
         target = identifier(projected.get('id'), 'dpl_')
         remote = read('/v13/deployments/' + target)
         if (remote.get('id') != target or safe_url(remote.get('url')) != safe_url(projected.get('url'))):
             raise Failure('deployment_readback_mismatch')
+    remote_meta = remote.get('meta', {})
     if (remote.get('id') != target or remote.get('readyState') != 'READY' or
             remote.get('target') != 'production' or remote.get('projectId') != pid or
-            remote.get('meta', {}).get('githubCommitSha') != sha or
-            str(remote.get('meta', {}).get('githubRepoId')) != rid or
-            remote.get('meta', {}).get('templatePublicConfigSha256') != config_sha):
+            remote_meta.get('githubCommitSha') != sha or
+            str(remote_meta.get('githubRepoId')) != rid or
+            remote_meta.get('templatePublicConfigSha256') != config_sha):
+        raise Failure('deployment_readback_mismatch')
+    if delivery_digest and remote_meta.get('templateDeliveryBindingSha256') != delivery_digest:
+        raise Failure('deployment_readback_mismatch')
+    if not delivery_digest and remote_meta.get('templateDeliveryBindingSha256'):
         raise Failure('deployment_readback_mismatch')
     urls = [safe_url(remote.get('url'))]
     aliases = remote.get('alias', [])
@@ -325,13 +464,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', required=True)
     parser.add_argument('--vercel-bin', required=True)
-    parser.add_argument('--operation', choices=('deploy', 'verify'), default='deploy')
+    parser.add_argument('--operation', choices=('deploy', 'verify', 'enroll'), default='deploy')
     parser.add_argument('--expected-project-id')
     parser.add_argument('--confirm-repository-id')
+    parser.add_argument('--bound-project-id')
     args = parser.parse_args()
     try:
         return run(Path(args.source).resolve(), args.vercel_bin, args.operation,
-                   args.expected_project_id or None, args.confirm_repository_id or None)
+                   args.expected_project_id or None, args.confirm_repository_id or None,
+                   args.bound_project_id or None)
     except Failure as exc:
         emit(status=str(exc))
     except Exception:

@@ -128,7 +128,11 @@ class WorkflowSafetyTests(unittest.TestCase):
         path = REPO_ROOT / APP_QUALITY_WORKFLOW
         self.assertTrue(path.is_file())
         wf = path.read_text(encoding="utf-8")
+        on_block = wf.split("jobs:", 1)[0]
+        self.assertNotRegex(on_block, r"(?m)^\s*pull_request_target\s*:")
         self.assertNotIn("pull_request_target", wf)
+        self.assertIn("branches: ['**']", on_block)
+        self.assertIn("github.event.repository.default_branch", wf)
         self.assertNotRegex(wf, r"secrets\.(CLOUDFLARE|VERCEL|SUPABASE|TERRAFORM|GOOGLE)_")
         self.assertNotIn("secrets.DOMAIN_NAME", wf)
         self.assertIn("permissions:", wf)

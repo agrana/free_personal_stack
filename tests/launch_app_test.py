@@ -147,11 +147,11 @@ class LaunchTests(unittest.TestCase):
                 self.assertEqual(self.run_app(),0)
                 self.assertEqual(self.state()['calls'],[])
             os.environ[key] = original
-    def test_push_never_creates_and_verify_never_creates(self):
+    def test_push_without_merge_policy_rejected_and_verify_never_creates(self):
         with self.assertRaisesRegex(app.Failure,'manual_creation_required'):
             self.run_app(operation='verify')
         os.environ['GITHUB_EVENT_NAME']='push'
-        with self.assertRaisesRegex(app.Failure,'manual_creation_required'): self.run_app()
+        with self.assertRaisesRegex(app.Failure,'event_not_authorized'): self.run_app()
         self.assertEqual(self.state()['calls'],[])
     def test_marker_conflict_and_exact_recovery(self):
         s=self.state(); s['project']={'id':'prj_Offline','name':'example-app','accountId':'team_Offline'}; self.save(s)
@@ -179,7 +179,7 @@ class LaunchTests(unittest.TestCase):
             ('GITHUB_EVENT_NAME','pull_request','event_not_authorized'),
             ('GITHUB_REF','refs/heads/other','event_not_authorized'),
             ('GITHUB_REPOSITORY_ID',app.UPSTREAM_ID,'template_or_repository_invalid'),
-            ('GITHUB_REPOSITORY','Owner/unsupported_name','slug_invalid'),
+            ('GITHUB_REPOSITORY','Owner/9unsupported','slug_invalid'),
             ('VERCEL_TEAM_ID','team_Wrong','team_unavailable')]:
             old=os.environ[key]; os.environ[key]=value
             with self.assertRaisesRegex(app.Failure,error): self.run_app()
@@ -267,5 +267,139 @@ class LaunchTests(unittest.TestCase):
         public = self.real_load('secrets-preflight')
         self.assertNotEqual(public.classify_supabase_public_key('sb_secret_private'), 'public')
         self.assertNotEqual(public.classify_supabase_public_key('SETUP_REQUIRED_REPLACE_WITH_REAL_VALUE'), 'public')
+
+    def test_enroll_creates_marker_never_deploys(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = app.run(self.source, str(self.binary), operation='enroll')
+        self.assertEqual(code, 0)
+        events = [json.loads(line) for line in buf.getvalue().splitlines() if line.strip()]
+        self.assertTrue(any(e.get('status') == 'plan' and 'production_deployment' not in e.get('allowed_mutations', []) for e in events))
+        plan = next(e for e in events if e.get('status') == 'plan')
+        self.assertEqual(plan['allowed_mutations'], ['create_project', 'repository_marker'])
+        enrolled = next(e for e in events if e.get('status') == 'project_enrolled')
+        self.assertEqual(enrolled['project_id'], 'prj_Offline')
+        self.assertEqual(enrolled['repository_id'], '2000000001')
+        self.assertEqual(enrolled['team_id'], 'team_Offline')
+        self.assertEqual(enrolled['source_sha'], self.sha)
+        self.assertEqual(self.deploy_count(), 0)
+        self.assertTrue(any(e['key'] == app.MARKER + '2000000001' for e in self.state()['envs']))
+        # Existing marked project enrolls without deploy even if production target missing/old.
+        s = self.state()
+        s['project']['targets'] = {'production': {'id': 'dpl_Old'}}
+        s['remote'] = {
+            'id': 'dpl_Old', 'url': 'offline.vercel.app', 'projectId': 'prj_Offline',
+            'target': 'production', 'readyState': 'ERROR',
+            'meta': {'githubCommitSha': '0' * 40, 'githubRepoId': '2000000001'},
+        }
+        self.save(s)
+        before = list(self.state()['calls'])
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(app.run(self.source, str(self.binary), operation='enroll'), 0)
+        self.assertEqual(self.deploy_count(), 0)
+        self.assertEqual(self.state()['calls'], before)
+
+    def test_enroll_recovery_same_safeguards_and_delivery_reuse(self):
+        s = self.state()
+        s['project'] = {'id': 'prj_Offline', 'name': 'example-app', 'accountId': 'team_Offline'}
+        self.save(s)
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(app.Failure, 'unmarked_project'):
+                app.run(self.source, str(self.binary), operation='enroll')
+            self.assertEqual(
+                app.run(self.source, str(self.binary), operation='enroll',
+                        expected_project='prj_Offline', confirm_repository='2000000001'),
+                0)
+        self.assertEqual(self.deploy_count(), 0)
+        # Public-config READY shell must not satisfy delivery-bound deploy reuse.
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(app.run(self.source, str(self.binary), operation='deploy'), 0)
+        digest = 'a' * 64
+        os.environ['ONBOARDING_DELIVERY_BINDING_SHA256'] = digest
+        try:
+            before = self.deploy_count()
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(app.run(self.source, str(self.binary), operation='deploy'), 0)
+            self.assertEqual(self.deploy_count(), before + 1)
+            metas = {}
+            for call, _value in self.state()['calls']:
+                if call and call[0] == 'deploy':
+                    for i, flag in enumerate(call):
+                        if flag == '--meta':
+                            key, value = call[i + 1].split('=', 1)
+                            metas[key] = value
+            self.assertEqual(metas.get('templateDeliveryBindingSha256'), digest)
+        finally:
+            os.environ.pop('ONBOARDING_DELIVERY_BINDING_SHA256', None)
+
+    def test_canonical_project_name_normalizes_underscores(self):
+        self.assertEqual(
+            app.canonical_vercel_project_name('my_app_repo'), 'my-app-repo')
+        self.assertEqual(
+            app.canonical_vercel_project_name('Example-App'), 'example-app')
+        with self.assertRaisesRegex(app.Failure, 'slug_invalid'):
+            app.canonical_vercel_project_name('---')
+        previous = os.environ['GITHUB_REPOSITORY']
+        os.environ['GITHUB_REPOSITORY'] = 'Owner/my_app_repo'
+        try:
+            self.save({'project': None, 'envs': [], 'calls': []})
+            self.assertEqual(self.run_app(), 0)
+            self.assertEqual(self.state()['project']['name'], 'my-app-repo')
+        finally:
+            os.environ['GITHUB_REPOSITORY'] = previous
+            self.save({'project': None, 'envs': [], 'calls': []})
+
+    def test_bound_deploy_preserves_matching_reviewed_recovery_policy(self):
+        s = self.state()
+        s['project'] = {'id': 'prj_Offline', 'name': 'example-app', 'accountId': 'team_Offline'}
+        s['envs'] = [{
+            'key': app.MARKER + '2000000001', 'value': 'opaque',
+            'target': ['production'], 'type': 'encrypted', 'visibility': 'config',
+        }]
+        self.save(s)
+        policy = {
+            'auto_apply': True,
+            'expected_project_id': 'prj_Offline',
+            'confirm_repository_id': '2000000001',
+            'hostname': 'example.invalid',
+        }
+        with patch.object(app, 'context', return_value=(
+                '2000000001', 'example-app', self.sha, policy)), \
+                patch.dict(os.environ, {'GITHUB_EVENT_NAME': 'push'}):
+            self.assertEqual(self.run_app(bound_project='prj_Offline'), 0)
+            s = self.state()
+            s['envs'] = []
+            self.save(s)
+            with self.assertRaisesRegex(app.Failure, 'bound_project_marker_missing'):
+                self.run_app(bound_project='prj_Offline')
+            policy['expected_project_id'] = 'prj_Other'
+            with self.assertRaisesRegex(app.Failure, 'bound_project_recovery_conflict'):
+                self.run_app(bound_project='prj_Offline')
+
+    def test_bound_project_pins_marked_project_and_rejects_drift(self):
+        s = self.state()
+        s['project'] = {'id': 'prj_Offline', 'name': 'example-app', 'accountId': 'team_Offline'}
+        s['envs'] = [{
+            'key': app.MARKER + '2000000001', 'value': 'opaque',
+            'target': ['production'], 'type': 'encrypted', 'visibility': 'config',
+        }]
+        self.save(s)
+        with self.assertRaisesRegex(app.Failure, 'bound_project_mismatch'):
+            self.run_app(bound_project='prj_Other')
+        # Bound + recovery is exclusive.
+        with self.assertRaisesRegex(app.Failure, 'bound_project_recovery_conflict'):
+            self.run_app(
+                bound_project='prj_Offline',
+                expected_project='prj_Offline',
+                confirm_repository='2000000001')
+        before = self.deploy_count()
+        self.assertEqual(self.run_app(bound_project='prj_Offline'), 0)
+        self.assertEqual(self.deploy_count(), before + 1)
+        # Unmarked bound project cannot be adopted via bound pin.
+        s = self.state()
+        s['envs'] = []
+        self.save(s)
+        with self.assertRaisesRegex(app.Failure, 'bound_project_marker_missing'):
+            self.run_app(bound_project='prj_Offline')
 
 if __name__ == '__main__': unittest.main()
