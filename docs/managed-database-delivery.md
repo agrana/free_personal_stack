@@ -37,6 +37,34 @@ still needed for authenticated PRIMARY pooler discovery (`database_pooling_confi
 this mode does not need `database_write` for a CLI-login POST. Separate catalog
 preflight, if enabled, retains its own permissions.
 
+#### Required connection: Session pooler, port 5432
+
+In Supabase Dashboard, open **Connect → Session pooler** before copying the
+connection string into `MDB_BOOTSTRAP_DATABASE_URL`. Copy the entire URI: session
+pooling uses both a different host and a project-suffixed login.
+
+- **Host:** the exact `*.pooler.supabase.com` host shown in Connect, also checked
+  against authenticated PRIMARY pooler metadata. Copy it; do not infer it from
+  the project's region.
+- **Port:** `5432` (session mode).
+- **Login:** `postgres.<project_ref>`; **database:** `postgres` for the standard
+  project connection. The validator also binds the database to provider metadata.
+- **Password:** the existing database password, percent-encoded in a URI.
+
+**Direct connection (`db.<project_ref>.supabase.co`) and Transaction pooler
+(port `6543`) are rejected by this bootstrap.** A direct connection on port
+5432 still has the wrong host and login for this contract. If execution reports
+`bootstrap_secret_binding_mismatch`, check host, port, database and login against
+the Session pooler connection; this validation occurs before password authentication.
+
+**Free-plan networking:** Supabase documents direct database connections on the
+Free plan as IPv6, while the shared pooler supports IPv4 in both session and
+transaction modes. Session mode is this bootstrap's required IPv4-compatible
+connection. Direct connections can work from IPv6-capable clients, and transaction
+pooling also exists on Free; session pooling is a requirement of this bootstrap,
+rather than the only connection method supported by the Free plan. See the
+[official connection methods and IP-version matrix](https://supabase.com/docs/guides/database/connecting-to-postgres).
+
 **Input contract:** libpq PostgreSQL URI (`postgresql://` / `postgres://`) or
 keyword conninfo, parsed with `psycopg.conninfo.conninfo_to_dict`. Supply explicit
 `host`, `port`, `dbname` (URI path), `user` and a nonempty real `password`.
