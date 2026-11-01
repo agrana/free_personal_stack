@@ -41,6 +41,9 @@ const nextConfig = {
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: modernPublishable || undefined,
   },
   experimental: {
+    outputFileTracingIncludes: {
+      '/*': ['./app/lib/certs/supabase-prod-ca-2021.crt'],
+    },
     optimizePackageImports: ['@supabase/supabase-js'],
   },
   reactStrictMode: true,

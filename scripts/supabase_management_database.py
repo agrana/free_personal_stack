@@ -7,8 +7,10 @@ DELETE /cli/login-role. Does not reset project postgres passwords.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+from pathlib import Path
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Protocol, Sequence, Tuple
@@ -395,6 +397,25 @@ def resolve_system_ssl_rootcert(
     raise ProviderError('system_ca_unavailable')
 
 
+PROVIDER_CA_SHA256 = '700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7'
+
+
+def resolve_provider_ssl_rootcert() -> str:
+    """Fixed, reviewed public provider trust; no caller path or network input.
+
+    Hash the complete asset on every use. Missing/tampered trust fails closed.
+    See docs/supabase-provider-trust.md for provenance and rotation policy.
+    """
+    path = Path(__file__).resolve().parents[1] / 'app/lib/certs/supabase-prod-ca-2021.crt'
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        raise ProviderError('provider_ca_unavailable') from None
+    if hashlib.sha256(raw).hexdigest() != PROVIDER_CA_SHA256:
+        raise ProviderError('provider_ca_integrity_failed')
+    return str(path)
+
+
 def build_psycopg_dsn(
     *,
     host: str,
@@ -408,7 +429,7 @@ def build_psycopg_dsn(
 ) -> str:
     """Build a keyword DSN with libpq-safe quoting via make_conninfo.
 
-    Real Supabase requires sslmode=verify-full plus an explicit system CA.
+    Real Supabase requires sslmode=verify-full plus the reviewed provider CA.
     Loopback fixtures may pass sslmode=disable explicitly; that is never a
     production policy bypass. Dynamic password/user/host values cannot inject
     extra libpq options.
@@ -428,12 +449,11 @@ def build_psycopg_dsn(
     else:
         if host in LOOPBACK_HOSTS:
             raise ProviderError('verify_full_forbidden_for_loopback_fixture')
-        if sslrootcert is None:
-            sslrootcert = resolve_system_ssl_rootcert()
-        if not isinstance(sslrootcert, str) or not sslrootcert.startswith('/'):
+        _validate_pooler_host(host)
+        reviewed_root = resolve_provider_ssl_rootcert()
+        if sslrootcert is not None and sslrootcert != reviewed_root:
             raise ProviderError('sslrootcert_invalid')
-        if not os.path.isfile(sslrootcert):
-            raise ProviderError('system_ca_unavailable')
+        sslrootcert = reviewed_root
     if not isinstance(password, str) or not password:
         raise ProviderError('password_missing')
     if not isinstance(user, str) or not user:
@@ -533,7 +553,7 @@ def validate_existing_bootstrap_conninfo(
         raise ProviderError('bootstrap_secret_sslmode_invalid')
     if parsed.get('sslrootcert') not in (None, 'system'):
         raise ProviderError('bootstrap_secret_sslrootcert_invalid')
-    rootcert = resolve_system_ssl_rootcert()
+    rootcert = resolve_provider_ssl_rootcert()
     rebuilt = build_psycopg_dsn(
         host=target.host, port=SESSION_POOLER_PORT, database=target.database,
         user=expected_user, password=password, sslmode=PRODUCTION_SSLMODE,

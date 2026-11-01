@@ -450,7 +450,7 @@ print(json.dumps({'status': 'child_environment_clean'}))
                 with patch.object(delivery, 'load', side_effect=modules.__getitem__), \
                      patch.object(cfg, 'capture_approved_migrations', return_value=[]), \
                      patch.object(mdb, 'migrations_from_captured_manifest', return_value=[]), \
-                     patch.object(provider, 'resolve_system_ssl_rootcert', return_value='/safe/root.crt'), \
+                     patch.object(provider, 'resolve_provider_ssl_rootcert', return_value='/safe/root.crt'), \
                      patch.object(provider, 'build_psycopg_dsn', return_value=dsn), \
                      patch.object(provider, 'validate_existing_bootstrap_conninfo', return_value=credentials), \
                      patch.object(provider, 'create_cli_login_role') as cli, \
@@ -634,14 +634,14 @@ class ProviderTransportTests(unittest.TestCase):
             parsed = conninfo_to_dict(validated.conninfo)
             self.assertEqual(parsed['password'], password)
             self.assertEqual(parsed['sslmode'], 'verify-full')
-            self.assertEqual(parsed['sslrootcert'], provider.resolve_system_ssl_rootcert())
+            self.assertEqual(parsed['sslrootcert'], provider.resolve_provider_ssl_rootcert())
             self.assertNotIn(password, repr(validated))
         uri = f'postgresql://postgres.abc:{quote(password, safe="")}@{target.host}:5432/postgres?sslmode=require'
         self.assertEqual(provider.validate_existing_bootstrap_conninfo(uri, target=target).password.value, password)
         system = provider.validate_existing_bootstrap_conninfo(
             make_conninfo(**dict(fields, sslrootcert='system')), target=target)
-        self.assertEqual(system.sslrootcert, provider.resolve_system_ssl_rootcert())
-        with patch.object(provider, 'resolve_system_ssl_rootcert', side_effect=provider.ProviderError('system_ca_unavailable')):
+        self.assertEqual(system.sslrootcert, provider.resolve_provider_ssl_rootcert())
+        with patch.object(provider, 'resolve_provider_ssl_rootcert', side_effect=provider.ProviderError('provider_ca_unavailable')):
             with self.assertRaises(provider.ProviderError):
                 provider.validate_existing_bootstrap_conninfo(uri, target=target)
         for key, value in (
@@ -831,7 +831,7 @@ class ProviderTransportTests(unittest.TestCase):
 
     def test_validate_runtime_conninfo_rejects_raw_and_wrong_binding(self):
         host = "aws-0-eu-central-1.pooler.supabase.com"
-        ca = provider.resolve_system_ssl_rootcert()
+        ca = provider.resolve_provider_ssl_rootcert()
         pw = _gen_secret("rt")
         good = provider.build_psycopg_dsn(
             host=host,
@@ -895,10 +895,10 @@ class ProviderTransportTests(unittest.TestCase):
             )
         self.assertEqual(str(ctx2.exception), "runtime_secret_unapproved_options")
 
-    def test_verify_full_selects_system_ca(self):
+    def test_verify_full_selects_reviewed_provider_ca(self):
         from psycopg.conninfo import conninfo_to_dict
 
-        ca = provider.resolve_system_ssl_rootcert()
+        ca = provider.resolve_provider_ssl_rootcert()
         self.assertTrue(Path(ca).is_file())
         dsn = provider.build_psycopg_dsn(
             host="aws-0-eu-central-1.pooler.supabase.com",

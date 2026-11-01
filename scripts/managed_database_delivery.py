@@ -923,7 +923,7 @@ def _execute_delivery_core(
     sslrootcert = None
     if effective_ssl == 'verify-full':
         try:
-            sslrootcert = provider.resolve_system_ssl_rootcert()
+            sslrootcert = provider.resolve_provider_ssl_rootcert()
         except provider.ProviderError as exc:
             report = build_report(status=str(exc), namespace=namespace, **exc.diagnostic_fields())
             _maybe_write_artifact(artifact_dir, report)
