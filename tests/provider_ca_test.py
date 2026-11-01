@@ -174,10 +174,13 @@ const raw = net.connect({host: '127.0.0.1', port: Number(process.argv[4])},
 raw.setTimeout(3000, () => process.exit(3));
 raw.once('data', data => {
  if (data.toString() !== 'S') process.exit(4);
+ let observed = false;
+ const report = status => { if (!observed) { observed = true; process.stdout.write(status); } };
  const client = tls.connect({...opts, socket: raw, servername: hostname}, () => {
-  client.end('synthetic startup'); process.stdout.write('trusted');
+  report('trusted'); client.end('synthetic startup');
  });
- client.on('error', () => process.stdout.write('rejected'));
+ // TLS trust is decided at secureConnect; later peer teardown is separate.
+ client.on('error', () => report('rejected'));
 });
 raw.on('error', () => process.exit(5));
 """
